@@ -3,24 +3,51 @@ import json
 import sys
 from .error_decoder import decode_solana_error
 from .simulator import SolanaSimulator
-from .visualizer import render_simulation_report
+from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence, render_simulation_report
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="sol-lens",
-        description="Headless Solana transaction simulation inspector and CPI visualizer.",
+        description="Headless Solana transaction simulation inspector, CPI visualizer, and pre-flight MEV guard.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # simulate command
-    p_sim = subparsers.add_parser("simulate", help="Simulate a base64 encoded transaction or analyze a log file.")
-    p_sim.add_argument("target", help="Base64 transaction string, or path to JSON simulation output / log file.")
-    p_sim.add_argument("--rpc", default="https://api.mainnet-beta.solana.com", help="Solana RPC endpoint.")
-    p_sim.add_argument("--json", action="store_true", help="Output raw JSON diagnostic structure.")
+    p_sim = subparsers.add_parser(
+        "simulate",
+        help="Simulate a base64 encoded transaction or analyze a JSON simulation / log file.",
+    )
+    p_sim.add_argument(
+        "target",
+        help="Base64 transaction string, or path to JSON simulation output / log file.",
+    )
+    p_sim.add_argument(
+        "--rpc",
+        default="https://api.mainnet-beta.solana.com",
+        help="Solana RPC endpoint.",
+    )
+    p_sim.add_argument(
+        "--json",
+        action="store_true",
+        help="Output full structured JSON diagnostic report.",
+    )
+    p_sim.add_argument(
+        "--mermaid",
+        action="store_true",
+        help="Output GitHub-renderable Mermaid sequence diagram.",
+    )
+    p_sim.add_argument(
+        "--flowchart",
+        action="store_true",
+        help="Output GitHub-renderable Mermaid flowchart diagram.",
+    )
 
     # decode-error command
-    p_dec = subparsers.add_parser("decode-error", help="Decode a numeric or hex Solana/Anchor error code.")
+    p_dec = subparsers.add_parser(
+        "decode-error",
+        help="Decode a numeric or hex Solana/Anchor error code.",
+    )
     p_dec.add_argument("code", help="Error code (e.g. 6001, 0x1771, Custom(6001)).")
     p_dec.add_argument("--program", default=None, help="Optional target program ID.")
 
@@ -29,12 +56,15 @@ def main() -> None:
     if args.command == "decode-error":
         err_info = decode_solana_error(args.code, args.program)
         print(f"Error Type:   {err_info.error_type}")
-        print(f"Error Code:   {err_info.code} (0x{err_info.code:x})" if err_info.code >= 0 else "Error Code:   N/A")
+        print(
+            f"Error Code:   {err_info.code} (0x{err_info.code:x})"
+            if err_info.code >= 0
+            else "Error Code:   N/A"
+        )
         print(f"Name:         {err_info.name}")
         print(f"Description:  {err_info.description}")
 
     elif args.command == "simulate":
-        # Check if target is a file or raw string
         sim_val = None
         try:
             with open(args.target, "r") as f:
@@ -54,8 +84,11 @@ def main() -> None:
             res = sim.simulate_encoded_transaction(args.target)
 
         if args.json:
-            import dataclasses
-            print(json.dumps(dataclasses.asdict(res), indent=2))
+            print(res.to_json(indent=2))
+        elif args.mermaid:
+            print(res.to_mermaid(diagram_type="sequence"))
+        elif args.flowchart:
+            print(res.to_mermaid(diagram_type="flowchart"))
         else:
             print(render_simulation_report(res))
 

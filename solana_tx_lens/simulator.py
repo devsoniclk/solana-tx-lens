@@ -2,8 +2,9 @@ import json
 import urllib.request
 from typing import Any, Dict, List, Optional
 from .cpi_parser import parse_cpi_tree
-from .diff_engine import compute_account_diffs
+from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
 from .error_decoder import decode_solana_error
+from .guard import assess_simulation_health
 from .models import SimulationResult
 
 
@@ -51,9 +52,15 @@ class SolanaSimulator:
         return self.parse_raw_simulation(val)
 
     @staticmethod
-    def parse_raw_simulation(sim_value: Dict[str, Any], pre_accounts: Optional[List[Dict[str, Any]]] = None) -> SimulationResult:
+    def parse_raw_simulation(
+        sim_value: Dict[str, Any],
+        pre_accounts: Optional[List[Dict[str, Any]]] = None,
+        pre_token_balances: Optional[List[Dict[str, Any]]] = None,
+        post_token_balances: Optional[List[Dict[str, Any]]] = None,
+    ) -> SimulationResult:
         """
-        Parses a raw RPC simulation value dictionary into a structured SimulationResult.
+        Parses a raw RPC simulation value dictionary into a structured SimulationResult,
+        including account diffs, token balance deltas, and pre-flight security health checks.
         """
         logs = sim_value.get("logs", []) or []
         err = sim_value.get("err")
@@ -63,9 +70,16 @@ class SolanaSimulator:
         post_accounts = sim_value.get("accounts", []) or []
         account_diffs = compute_account_diffs(pre_accounts or [], post_accounts)
 
+        # Extract token balances if provided directly or embedded in sim_value
+        pre_tb = pre_token_balances or sim_value.get("preTokenBalances", []) or []
+        post_tb = post_token_balances or sim_value.get("postTokenBalances", []) or []
+        token_diffs = compute_token_diffs(pre_tb, post_tb)
+
+        if not token_diffs and logs:
+            token_diffs = parse_token_transfers_from_logs(logs)
+
         error_info = None
         if err:
-            # Find the failing program ID if recorded
             failing_prog = None
             for root in cpi_roots:
                 if root.failed:
@@ -73,12 +87,22 @@ class SolanaSimulator:
                     break
             error_info = decode_solana_error(err, failing_prog)
 
-        return SimulationResult(
+        max_cus = 200_000 if units_consumed <= 200_000 else 1_400_000
+        # If ComputeBudget was used in transaction, detect requested limit from logs if present
+        for line in logs:
+            if "SetComputeUnitLimit" in line:
+                pass
+
+        result = SimulationResult(
             success=(err is None),
             total_compute_units=units_consumed,
-            max_compute_units=200_000 if units_consumed <= 200_000 else 1_400_000,
+            max_compute_units=max_cus,
             cpi_roots=cpi_roots,
             account_diffs=account_diffs,
+            token_diffs=token_diffs,
             error=error_info,
             raw_logs=logs,
         )
+
+        result.health = assess_simulation_health(result)
+        return result

@@ -1,24 +1,50 @@
 """
 solana-tx-lens: Headless transaction simulation inspector, CPI tree visualizer,
-and Anchor error decoder for Solana.
+pre-flight MEV safety guard, and Anchor error decoder for Solana.
 """
 
 from .cpi_parser import parse_cpi_tree
-from .diff_engine import compute_account_diffs
+from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
 from .error_decoder import decode_solana_error
-from .models import AccountDiff, CPIInvocation, ErrorInfo, SimulationResult
+from .guard import assess_simulation_health
+from .instruction_decoder import extract_instruction_name, get_program_label
+from .models import (
+    AccountDiff,
+    CPIInvocation,
+    ErrorInfo,
+    HealthIssue,
+    SimulationHealth,
+    SimulationResult,
+    TokenBalanceDiff,
+)
 from .simulator import SolanaSimulator
-from .visualizer import render_cpi_tree
+from .visualizer import (
+    render_cpi_mermaid_flowchart,
+    render_cpi_mermaid_sequence,
+    render_cpi_tree,
+    render_simulation_report,
+)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "SolanaSimulator",
     "parse_cpi_tree",
     "render_cpi_tree",
+    "render_cpi_mermaid_sequence",
+    "render_cpi_mermaid_flowchart",
+    "render_simulation_report",
     "decode_solana_error",
     "compute_account_diffs",
+    "compute_token_diffs",
+    "parse_token_transfers_from_logs",
+    "assess_simulation_health",
+    "get_program_label",
+    "extract_instruction_name",
     "SimulationResult",
     "CPIInvocation",
     "AccountDiff",
+    "TokenBalanceDiff",
+    "SimulationHealth",
+    "HealthIssue",
     "ErrorInfo",
 ]

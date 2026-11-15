@@ -1,5 +1,6 @@
 import re
 from typing import List, Tuple
+from .instruction_decoder import extract_instruction_name, get_program_label
 from .models import CPIInvocation
 
 INVOKE_RE = re.compile(r"^Program (\w+) invoke \[(\d+)\]")
@@ -11,10 +12,12 @@ CONSUMED_RE = re.compile(r"^Program (\w+) consumed (\d+) of (\d+) compute units"
 def parse_cpi_tree(logs: List[str]) -> List[CPIInvocation]:
     """
     Parses Solana runtime simulation logs into a nested tree of CPIInvocation objects.
-    Extracts program IDs, execution depths, consumed compute units, and failures.
+    Extracts program IDs, program labels, instruction names, execution depths,
+    consumed compute units, and failures.
     """
     roots: List[CPIInvocation] = []
     stack: List[CPIInvocation] = []
+    all_nodes: List[CPIInvocation] = []
 
     for line in logs:
         line = line.strip()
@@ -24,7 +27,12 @@ def parse_cpi_tree(logs: List[str]) -> List[CPIInvocation]:
         if m_invoke:
             prog_id = m_invoke.group(1)
             depth = int(m_invoke.group(2))
-            node = CPIInvocation(program_id=prog_id, depth=depth)
+            node = CPIInvocation(
+                program_id=prog_id,
+                depth=depth,
+                program_name=get_program_label(prog_id),
+            )
+            all_nodes.append(node)
 
             if depth == 1:
                 roots.append(node)
@@ -65,5 +73,9 @@ def parse_cpi_tree(logs: List[str]) -> List[CPIInvocation]:
             if stack and stack[-1].program_id == m_failed.group(1):
                 stack.pop()
             continue
+
+    # Post-process all nodes to extract instruction names from accumulated logs
+    for node in all_nodes:
+        node.instruction_name = extract_instruction_name(node.logs)
 
     return roots
