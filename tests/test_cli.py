@@ -242,3 +242,102 @@ def test_cli_bundle_subcommand():
     finally:
         Path(tf_path).unlink(missing_ok=True)
         Path(html_out).unlink(missing_ok=True)
+
+
+def test_cli_mev_radar_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    sim_data = {
+        "unitsConsumed": 85_000,
+        "logs": [
+            "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 invoke [1]",
+            "Program log: Instruction: SwapBaseIn",
+            "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 success",
+        ],
+    }
+    tf = tmp_path / "sim_mev.json"
+    tf.write_text(json.dumps(sim_data), encoding="utf-8")
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "mev-radar", str(tf), "--slippage", "350"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "PRE-FLIGHT MEV RADAR" in res.stdout
+    assert "CRITICAL" in res.stdout
+
+    res_json = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "mev-radar", str(tf), "--json"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res_json.returncode == 0
+    data = json.loads(res_json.stdout)
+    assert "risk_level" in data
+    assert data["is_dex_swap"] is True
+
+
+def test_cli_route_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    sim_data = {
+        "unitsConsumed": 95_000,
+        "logs": [
+            "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc invoke [1]",
+            "Program log: Instruction: Swap",
+            "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc success",
+        ],
+    }
+    tf = tmp_path / "sim_route.json"
+    tf.write_text(json.dumps(sim_data), encoding="utf-8")
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "route", str(tf)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "MULTI-DEX SWAP ROUTE" in res.stdout
+    assert "Orca Whirlpool" in res.stdout
+
+    res_mermaid = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "route", str(tf), "--mermaid"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res_mermaid.returncode == 0
+    assert "flowchart LR" in res_mermaid.stdout
+
+
+def test_cli_fee_guide_subcommand():
+    repo_root = Path(__file__).parent.parent
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "fee-guide", "--cus", "180000", "--type", "dex_swap"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "DYNAMIC PRIORITY FEE & JITO TIP ADVISORY" in res.stdout
+    assert "DEX_SWAP" in res.stdout
+    assert "180,000 CUs" in res.stdout
+
+    res_json = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "fee-guide", "--cus", "180000", "--json"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res_json.returncode == 0
+    data = json.loads(res_json.stdout)
+    assert data["tx_type"] == "dex_swap"
+    assert len(data["priority_fee_tiers"]) == 6

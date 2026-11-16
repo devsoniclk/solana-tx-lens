@@ -6,9 +6,12 @@ import sys
 from .bundle import BundleSimulator
 from .contention import audit_account_contention
 from .error_decoder import decode_solana_error
+from .fee_guide import generate_fee_guide
 from .html_report import render_bundle_html_report, render_html_report
 from .mcp_server import SolanaLensMCPServer
+from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
+from .route_analyzer import analyze_swap_route
 from .simulator import SolanaSimulator
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence, render_simulation_report
 
@@ -136,6 +139,37 @@ def main() -> None:
     )
     p_dec.add_argument("code", help="Error code (e.g. 6001, 0x1771, Custom(6001)).")
     p_dec.add_argument("--program", default=None, help="Optional target program ID.")
+
+    # mev-radar command
+    p_mev = subparsers.add_parser(
+        "mev-radar",
+        help="Scan a transaction simulation for sandwich attacks, excessive slippage, and MEV exposure.",
+    )
+    p_mev.add_argument("target", help="Base64 transaction string, or path to JSON simulation / log file.")
+    p_mev.add_argument("--slippage", type=int, default=None, help="Configured slippage tolerance in basis points (e.g. 50 = 0.50%).")
+    p_mev.add_argument("--private", action="store_true", help="Mark as private broadcast (not public validator gossip).")
+    p_mev.add_argument("--rpc", default="https://api.mainnet-beta.solana.com", help="Solana RPC endpoint.")
+    p_mev.add_argument("--json", action="store_true", help="Output MEV report as JSON.")
+
+    # route command
+    p_rt = subparsers.add_parser(
+        "route",
+        help="Analyze multi-hop DEX swap routing, token price ratios, and cyclic arbitrage loops.",
+    )
+    p_rt.add_argument("target", help="Base64 transaction string, or path to JSON simulation / log file.")
+    p_rt.add_argument("--rpc", default="https://api.mainnet-beta.solana.com", help="Solana RPC endpoint.")
+    p_rt.add_argument("--mermaid", action="store_true", help="Output route as Mermaid flowchart.")
+    p_rt.add_argument("--json", action="store_true", help="Output route report as JSON.")
+
+    # fee-guide command
+    p_fg = subparsers.add_parser(
+        "fee-guide",
+        help="Generate dynamic multi-tier priority fee and Jito MEV tip recommendations.",
+    )
+    p_fg.add_argument("--cus", type=int, default=200_000, help="Estimated compute units consumed (default: 200,000).")
+    p_fg.add_argument("--type", default="dex_swap", choices=["transfer", "dex_swap", "arbitrage", "nft_mint", "generic"], help="Transaction archetype.")
+    p_fg.add_argument("--bundle", action="store_true", help="Calculate fees for Jito MEV bundle.")
+    p_fg.add_argument("--json", action="store_true", help="Output fee guide as JSON.")
 
     args = parser.parse_args()
 
@@ -272,6 +306,120 @@ def main() -> None:
                 print("\nWarnings:")
                 for w in cnt.warnings:
                     print(f"  ⚠️ {w}")
+            print("==================================================")
+
+    elif args.command == "mev-radar":
+        sim_val = None
+        try:
+            with open(args.target, "r") as f:
+                content = f.read().strip()
+                try:
+                    sim_val = json.loads(content)
+                except json.JSONDecodeError:
+                    sim_val = {"logs": content.splitlines(), "unitsConsumed": 0, "err": None}
+        except (FileNotFoundError, OSError):
+            pass
+
+        sim = SolanaSimulator(rpc_url=args.rpc)
+        if sim_val:
+            res = sim.parse_raw_simulation(sim_val)
+        else:
+            res = sim.simulate_encoded_transaction(args.target)
+
+        radar = scan_mev_vulnerabilities(res, slippage_tolerance_bps=args.slippage, is_public_mempool=not args.private)
+        if args.json:
+            print(json.dumps(radar.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" PRE-FLIGHT MEV RADAR & SANDWICH RISK AUDIT")
+            print("==================================================")
+            print(f"Risk Rating:         {radar.risk_level}")
+            print(f"Sandwich Exposure:   {'YES (Vulnerable)' if radar.is_sandwich_vulnerable else 'NO (Protected)'}")
+            print(f"DEX Interaction:     {'Detected' if radar.is_dex_swap else 'None'}")
+            if radar.detected_slippage_bps is not None:
+                print(f"Slippage Configured: {radar.detected_slippage_bps} bps ({radar.detected_slippage_bps/100:.2f}%)")
+            print(f"Max Recommended:     {radar.max_recommended_slippage_bps} bps ({radar.max_recommended_slippage_bps/100:.2f}%)")
+            print(f"\nSummary:\n  {radar.summary}")
+            if radar.attack_vectors:
+                print("\nIdentified Attack Vectors:")
+                for vec in radar.attack_vectors:
+                    print(f"  ⚠️ [{vec.severity}] {vec.vector_type}: {vec.description}")
+                    print(f"     Impact: {vec.impact}")
+                    print(f"     Fix:    {vec.remediation}")
+            if radar.mitigations:
+                print("\nActionable Mitigations:")
+                for m in radar.mitigations:
+                    print(f"  ✓ {m}")
+            print("==================================================")
+
+    elif args.command == "route":
+        sim_val = None
+        try:
+            with open(args.target, "r") as f:
+                content = f.read().strip()
+                try:
+                    sim_val = json.loads(content)
+                except json.JSONDecodeError:
+                    sim_val = {"logs": content.splitlines(), "unitsConsumed": 0, "err": None}
+        except (FileNotFoundError, OSError):
+            pass
+
+        sim = SolanaSimulator(rpc_url=args.rpc)
+        if sim_val:
+            res = sim.parse_raw_simulation(sim_val)
+        else:
+            res = sim.simulate_encoded_transaction(args.target)
+
+        route_rep = analyze_swap_route(res)
+        if args.json:
+            print(json.dumps(route_rep.to_dict(), indent=2))
+        elif args.mermaid:
+            print(route_rep.mermaid_flowchart)
+        else:
+            print("==================================================")
+            print(" MULTI-DEX SWAP ROUTE & FLOW GRAPH AUDIT")
+            print("==================================================")
+            print(f"Swap Detected:    {'Yes' if route_rep.is_swap else 'No'}")
+            print(f"Total Hops:       {route_rep.total_hops}")
+            print(f"DEXs Involved:    {', '.join(route_rep.dexes_involved) or 'None'}")
+            if route_rep.is_cyclic_arbitrage:
+                print(f"Cyclic Arbitrage: YES (PnL: {route_rep.arbitrage_profit:+} {route_rep.input_token})")
+            print(f"\nRoute Flow Diagram:\n  {route_rep.ascii_diagram}")
+            print(f"\nSummary:\n  {route_rep.summary}")
+            if route_rep.hops:
+                print("\nHop Execution Breakdown:")
+                for hop in route_rep.hops:
+                    rate_str = f" @ rate 1:{hop.effective_rate:.4f}" if hop.effective_rate > 0 else ""
+                    print(f"  [{hop.hop_index}] {hop.dex_name}: {hop.amount_in:,.4f} {hop.token_in_symbol} -> {hop.amount_out:,.4f} {hop.token_out_symbol}{rate_str} ({hop.cus_consumed:,} CUs)")
+            print("==================================================")
+
+    elif args.command == "fee-guide":
+        guide = generate_fee_guide(estimated_cus=args.cus, tx_type=args.type, is_bundle=args.bundle)
+        if args.json:
+            print(json.dumps(guide.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" DYNAMIC PRIORITY FEE & JITO TIP ADVISORY")
+            print("==================================================")
+            print(f"Transaction Type:    {guide.tx_type.upper()}")
+            print(f"Estimated CUs:       {guide.estimated_cus:,} CUs")
+            print(f"Recommended Limit:   {guide.recommended_cu_limit:,} CUs")
+            print(f"\nRecommendation:\n  {guide.recommendation}")
+            print("\nPriority Fee Tiers (SetComputeUnitPrice):")
+            print(f"  {'Tier':<8} | {'Percentile':<10} | {'µ-lamports/CU':<14} | {'Total Fee (SOL)'}")
+            print("  " + "-" * 55)
+            for pt in guide.priority_fee_tiers:
+                print(f"  {pt.tier:<8} | {pt.percentile}th       | {pt.micro_lamports_per_cu:<14,d} | {pt.total_fee_sol:.6f} SOL")
+
+            print("\nJito MEV Tip Tiers (Private Leader Submission):")
+            print(f"  {'Tier':<18} | {'Tip (SOL)':<12} | {'Landing Prob':<12} | {'Tip Lamports'}")
+            print("  " + "-" * 60)
+            for jt in guide.jito_tip_tiers:
+                print(f"  {jt.tier:<18} | {jt.tip_sol:.6f} SOL | {jt.target_block_landing_prob:<12} | {jt.tip_lamports:,}")
+
+            print("\nSDK / CLI Implementation Snippet:")
+            for line in guide.cli_instructions.splitlines():
+                print(f"  {line}")
             print("==================================================")
 
     elif args.command == "simulate":

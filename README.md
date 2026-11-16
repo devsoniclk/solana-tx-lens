@@ -5,7 +5,7 @@
 [![CI](https://github.com/devsoniclk/solana-tx-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/devsoniclk/solana-tx-lens/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/solana-tx-lens/)
-[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
+[![Version](https://img.shields.io/badge/version-0.5.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
 
 ---
 
@@ -21,10 +21,13 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 
 ## 3. What `solana-tx-lens` Does Differently
 `solana-tx-lens` provides a **lightweight, headless simulation & diagnostic engine** with zero validator overhead:
-- **Model Context Protocol (MCP) Server**: Provides standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Model Context Protocol (MCP) Server**: Provides standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Pre-flight MEV Vulnerability Radar & Sandwich Protection**: Evaluates simulated DEX interactions for two-sided sandwich exposure, excessive slippage tolerance (>0.50%), public mempool vulnerability, and frontrunning risks with automated remediation instructions.
+- **Multi-DEX Swap Route & Flow Graph Analyzer**: Reconstructs complete multi-hop swap sequences across Raydium, Orca Whirlpools, Pump.fun, Meteora DLMM, and Lifinity, rendering ASCII pipeline graphs, Mermaid flowcharts, effective exchange rates, and cyclic arbitrage detection.
+- **Dynamic Priority Fee & Jito Tip Guide**: Generates dynamic Compute Unit limits, 6-tier prioritization fees (Min, Low, Medium, High, Ultra, Extreme), and 4-tier Jito leader tips (Standard, High Priority, Urgent Arbitrage, Sniper) with turnkey Web3 SDK snippets.
 - **Atomic Jito / MEV Bundle Simulator**: Simulates multi-transaction sequences in atomic order, tracking cumulative CUs, verifying Jito tip accounts, detecting cross-transaction balance transitions, and auditing cross-tx write lock collisions.
 - **Nested CPI Execution Tree**: Reconstructs multi-level Cross-Program Invocations (`invoke [1]`, `invoke [2]`, `invoke [3]`) into an ASCII/JSON call graph with program names and recognized instructions (`swap_exact_in`, `buy`, `TransferChecked`).
-- **Dynamic Compute Budget & Priority Fee Optimizer**: Calculates exact optimal `SetComputeUnitLimit` (with configurable safety buffer) and projects fees across priority tiers (Min, Low, Medium, High, Ultra), slashing excess CU fees by up to 75%.
+- **Dynamic Compute Budget & Priority Fee Optimizer**: Calculates exact optimal `SetComputeUnitLimit` (with configurable safety buffer) and projects fees across priority tiers, slashing excess CU fees by up to 75%.
 - **Account Write-Lock Contention & Parallelism Auditor**: Identifies write-locked hotspot accounts (shared AMM pools, Raydium/Orca vaults, sysvars), scores parallelizability (0.0 to 1.0), and alerts on lock contention that serializes Sealevel runtime execution.
 - **Interactive Dark-Mode HTML Diagnostic Dossier**: Generates self-contained, dependency-free HTML diagnostic reports (`--html report.html`) featuring collapsible CPI tree nodes, balance delta badges, bundle timelines, and copyable Mermaid diagram sources.
 - **Pre-flight MEV & Safety Guard**: Evaluates transaction health prior to broadcast. Flags CU exhaustion risks (>85% limit), slippage breaches (0x1771/6001), asymmetric token drains (sandwich/front-run detection), and missing priority fees.
@@ -37,6 +40,9 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 
 ## 4. Key Features
 - **MCP Server for AI Agents**: Plug-and-play JSON-RPC 2.0 interface for AI trading and coding agents.
+- **Pre-Flight MEV Radar**: Scan transactions for sandwich attacks, excessive slippage, and mempool vulnerabilities.
+- **Multi-DEX Route Analyzer**: Visualize token swap pathways and detect cyclic arbitrage loops.
+- **Dynamic Priority Fee & Jito Tip Guide**: Exact micro-lamports and tip tiers per transaction archetype.
 - **Atomic Bundle Simulator**: Cumulative CUs, Jito tip validation, and cross-tx state transitions.
 - **Simulation Diagnostics**: Inspect arbitrary base64 transactions via RPC or parse raw JSON simulation outputs.
 - **Compute Budget Right-Sizing**: Exact CU limit and priority fee recommendations per transaction.
@@ -140,6 +146,17 @@ sol-lens simulate simulation_dump.json
 # Generate an offline, dark-themed interactive HTML diagnostic dossier
 sol-lens simulate simulation_dump.json --html dossier.html
 
+# Scan transaction for sandwich attacks, excessive slippage, and MEV exposure
+sol-lens mev-radar simulation_dump.json --slippage 300
+
+# Analyze multi-hop DEX swap route and render ASCII pipeline or Mermaid flow
+sol-lens route simulation_dump.json
+sol-lens route simulation_dump.json --mermaid
+
+# Generate dynamic priority fee tiers and Jito tip guide
+sol-lens fee-guide --cus 180000 --type dex_swap
+sol-lens fee-guide --cus 250000 --bundle
+
 # Compute optimal Compute Budget limit and priority fee tiers
 sol-lens optimize 45000
 sol-lens optimize simulation_dump.json
@@ -162,7 +179,14 @@ sol-lens decode-error 6001
 ## 9. Python SDK Usage
 
 ```python
-from solana_tx_lens import SolanaSimulator, BundleSimulator, optimize_compute_budget
+from solana_tx_lens import (
+    SolanaSimulator,
+    BundleSimulator,
+    optimize_compute_budget,
+    scan_mev_vulnerabilities,
+    analyze_swap_route,
+    generate_fee_guide,
+)
 
 # 1. Single Transaction Simulation
 simulator = SolanaSimulator(rpc_url="https://api.mainnet-beta.solana.com")
@@ -172,7 +196,19 @@ print(f"Status: {result.success}")
 print(f"Compute Units: {result.total_compute_units:,}")
 print(result.to_html(title="Transaction Dossier"))
 
-# 2. Atomic Multi-Transaction Bundle Simulation
+# 2. Pre-Flight MEV Vulnerability Radar & Sandwich Protection
+radar = scan_mev_vulnerabilities(result, slippage_tolerance_bps=150)
+print(f"MEV Risk Rating: {radar.risk_level} (Sandwich: {radar.is_sandwich_vulnerable})")
+
+# 3. Multi-DEX Swap Route Analysis
+route = analyze_swap_route(result)
+print(f"Route: {route.ascii_diagram}")
+
+# 4. Dynamic Priority Fee & Jito Tip Guide
+fee_guide = generate_fee_guide(estimated_cus=result.total_compute_units, tx_type="dex_swap")
+print(fee_guide.recommendation)
+
+# 5. Atomic Multi-Transaction Bundle Simulation
 bundle_sim = BundleSimulator()
 bundle_result = bundle_sim.simulate_bundle([tx1_dict, tx2_dict])
 

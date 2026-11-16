@@ -182,6 +182,29 @@ def render_simulation_report(result: SimulationResult) -> str:
         for w in cnt.warnings:
             header.append(f"  ⚠️ {w}")
 
+    # MEV Vulnerability Radar
+    if getattr(result, "mev_radar", None):
+        radar = result.mev_radar
+        header.append("\n[MEV Vulnerability Radar & Sandwich Protection]")
+        header.append(f"  Risk Level:          {radar.risk_level}")
+        header.append(f"  Sandwich Exposure:   {'YES (Vulnerable)' if radar.is_sandwich_vulnerable else 'NO (Protected/Low)'}")
+        header.append(f"  Summary:             {radar.summary}")
+        if radar.attack_vectors:
+            for vec in radar.attack_vectors:
+                header.append(f"  ⚠️ [{vec.severity}] {vec.vector_type}: {vec.description}")
+        if radar.mitigations:
+            header.append("  Mitigation Checklist:")
+            for m in radar.mitigations:
+                header.append(f"    ✓ {m}")
+
+    # Multi-DEX Swap Route
+    if getattr(result, "route", None) and result.route.is_swap:
+        rt = result.route
+        header.append("\n[Multi-DEX Swap Route & Flow]")
+        header.append(f"  Hops:                {rt.total_hops} ({' -> '.join(rt.dexes_involved)})")
+        header.append(f"  Route Flow:          {rt.ascii_diagram}")
+        header.append(f"  Summary:             {rt.summary}")
+
     header.append("\n[Cross-Program Invocation (CPI) Execution Tree]")
     if result.cpi_roots:
         header.append(render_cpi_tree(result.cpi_roots))

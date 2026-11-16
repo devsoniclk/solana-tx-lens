@@ -16,10 +16,12 @@ from .contention import AccountAccess, ContentionReport, audit_account_contentio
 from .cpi_parser import parse_cpi_tree
 from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
 from .error_decoder import decode_solana_error
+from .fee_guide import JitoTipTier, PriorityFeeTier, SolanaFeeGuide, generate_fee_guide
 from .guard import assess_simulation_health
 from .html_report import render_bundle_html_report, render_html_report
 from .instruction_decoder import extract_instruction_name, get_program_label
 from .mcp_server import SolanaLensMCPServer
+from .mev_radar import MEVAttackVector, MEVVulnerabilityReport, scan_mev_vulnerabilities
 from .models import (
     AccountDiff,
     CPIInvocation,
@@ -30,6 +32,7 @@ from .models import (
     TokenBalanceDiff,
 )
 from .optimizer import ComputeBudgetOptimization, optimize_compute_budget
+from .route_analyzer import SwapHop, SwapRouteReport, analyze_swap_route, render_route_ascii, render_route_mermaid
 from .simulator import SolanaSimulator
 from .visualizer import (
     render_cpi_mermaid_flowchart,
@@ -38,7 +41,7 @@ from .visualizer import (
     render_simulation_report,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     "SolanaSimulator",
     "BundleSimulator",
@@ -60,6 +63,11 @@ __all__ = [
     "assess_simulation_health",
     "optimize_compute_budget",
     "audit_account_contention",
+    "scan_mev_vulnerabilities",
+    "analyze_swap_route",
+    "render_route_ascii",
+    "render_route_mermaid",
+    "generate_fee_guide",
     "get_program_label",
     "extract_instruction_name",
     "SimulationResult",
@@ -72,4 +80,11 @@ __all__ = [
     "ComputeBudgetOptimization",
     "ContentionReport",
     "AccountAccess",
+    "MEVVulnerabilityReport",
+    "MEVAttackVector",
+    "SwapRouteReport",
+    "SwapHop",
+    "SolanaFeeGuide",
+    "PriorityFeeTier",
+    "JitoTipTier",
 ]

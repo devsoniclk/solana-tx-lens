@@ -173,6 +173,73 @@ def render_html_report(
         </div>
         """
 
+    # MEV Radar Section
+    radar = getattr(result, "mev_radar", None)
+    radar_html = ""
+    if radar:
+        radar_badge_cls = (
+            "badge-green" if radar.risk_level == "SAFE"
+            else ("badge-yellow" if radar.risk_level in ("LOW", "MEDIUM") else "badge-red")
+        )
+        vec_rows = []
+        for vec in radar.attack_vectors:
+            sev_badge = f"<span class='badge sev-{vec.severity.lower()}'>{vec.severity}</span>"
+            vec_rows.append(
+                f"<div class='issue-card sev-{vec.severity.lower()}'>"
+                f"<div class='issue-header'>{sev_badge} <strong>{html.escape(vec.vector_type)}</strong></div>"
+                f"<div class='issue-msg'>{html.escape(vec.description)}</div>"
+                f"<div class='issue-rec'><strong>Impact:</strong> {html.escape(vec.impact)}<br/><strong>Fix:</strong> {html.escape(vec.remediation)}</div>"
+                f"</div>"
+            )
+        vecs_html = "".join(vec_rows) or "<p class='dim'>No vulnerable attack vectors identified.</p>"
+        mit_items = "".join(f"<li>✓ {html.escape(m)}</li>" for m in radar.mitigations)
+        radar_html = f"""
+        <div class="card">
+            <h3>🛡️ MEV Vulnerability Radar & Sandwich Protection</h3>
+            <div class="grid-stats">
+                <div class="stat"><span class="label">Risk Level</span><span class="val {radar_badge_cls}">{radar.risk_level}</span></div>
+                <div class="stat"><span class="label">Sandwich Vulnerable</span><span class="val {'neg' if radar.is_sandwich_vulnerable else 'pos'}">{'YES' if radar.is_sandwich_vulnerable else 'NO'}</span></div>
+                <div class="stat"><span class="label">DEX Swap</span><span class="val">{'YES' if radar.is_dex_swap else 'NO'}</span></div>
+                <div class="stat"><span class="label">Max Safe Slippage</span><span class="val highlight">{radar.max_recommended_slippage_bps} bps (0.50%)</span></div>
+            </div>
+            <p class="summary-text">{html.escape(radar.summary)}</p>
+            <div style="margin-top: 12px;">{vecs_html}</div>
+            {"<ul class='warn-list' style='margin-top: 12px; color: var(--green);'>" + mit_items + "</ul>" if radar.mitigations else ""}
+        </div>
+        """
+
+    # Multi-DEX Swap Route Section
+    route = getattr(result, "route", None)
+    route_html = ""
+    if route and route.is_swap:
+        hop_rows = []
+        for hop in route.hops:
+            rate_str = f"1 : {hop.effective_rate:.4f}" if hop.effective_rate > 0 else "—"
+            hop_rows.append(
+                f"<tr>"
+                f"<td><strong>Hop {hop.hop_index}</strong></td>"
+                f"<td>{html.escape(hop.dex_name)}</td>"
+                f"<td><code>{hop.amount_in:,.4f} {html.escape(hop.token_in_symbol)}</code></td>"
+                f"<td><code>{hop.amount_out:,.4f} {html.escape(hop.token_out_symbol)}</code></td>"
+                f"<td>{rate_str}</td>"
+                f"<td>{hop.cus_consumed:,} CUs</td>"
+                f"</tr>"
+            )
+        arb_badge = "<span class='badge' style='background: #238636; color: #fff; margin-left: 8px;'>CYCLIC ARBITRAGE</span>" if route.is_cyclic_arbitrage else ""
+        route_html = f"""
+        <div class="card">
+            <h3>🔄 Multi-DEX Swap Route & Flow {arb_badge}</h3>
+            <p class="summary-text">{html.escape(route.summary)}</p>
+            <div style="background: #0d1117; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; color: var(--accent); margin-bottom: 16px; overflow-x: auto;">
+                {html.escape(route.ascii_diagram)}
+            </div>
+            <table>
+                <thead><tr><th>Hop</th><th>DEX / AMM</th><th>Token In</th><th>Token Out</th><th>Rate</th><th>Compute Units</th></tr></thead>
+                <tbody>{''.join(hop_rows)}</tbody>
+            </table>
+        </div>
+        """
+
     raw_logs_html = html.escape("\n".join(result.raw_logs)) or "No logs available."
     mermaid_seq = html.escape(result.to_mermaid(diagram_type="sequence"))
     mermaid_flow = html.escape(result.to_mermaid(diagram_type="flowchart"))
@@ -267,6 +334,10 @@ pre {{ background: #0d1117; border: 1px solid var(--border); padding: 12px; bord
 {opt_html}
 
 {cnt_html}
+
+{radar_html}
+
+{route_html}
 
 <div class="card">
     <h3>🛡️ Pre-Flight Safety & MEV Guard</h3>

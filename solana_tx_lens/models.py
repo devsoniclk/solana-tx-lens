@@ -83,6 +83,8 @@ class SimulationResult:
     error: Optional[ErrorInfo] = None
     optimization: Optional[Any] = None
     contention: Optional[Any] = None
+    mev_radar: Optional[Any] = None
+    route: Optional[Any] = None
     raw_logs: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:

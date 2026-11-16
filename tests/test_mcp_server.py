@@ -18,7 +18,7 @@ def test_mcp_initialize():
     assert resp["id"] == 1
     assert resp["result"]["protocolVersion"] == "2024-11-05"
     assert resp["result"]["serverInfo"]["name"] == "solana-tx-lens-mcp"
-    assert resp["result"]["serverInfo"]["version"] == "0.4.0"
+    assert resp["result"]["serverInfo"]["version"] == "0.5.0"
 
 
 def test_mcp_tools_list():
@@ -162,6 +162,84 @@ def test_mcp_call_generate_dossier():
     finally:
         if os.path.exists(out_path):
             os.remove(out_path)
+
+
+def test_mcp_call_mev_radar():
+    server = SolanaLensMCPServer()
+    sim_data = {
+        "unitsConsumed": 80_000,
+        "logs": [
+            "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 invoke [1]",
+            "Program log: Instruction: SwapBaseIn",
+            "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 success",
+        ],
+    }
+    req = {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_mev_radar",
+            "arguments": {
+                "simulation_json": json.dumps(sim_data),
+                "slippage_tolerance_bps": 250,
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert "risk_level" in content
+    assert content["is_dex_swap"] is True
+    assert content["is_sandwich_vulnerable"] is True
+
+
+def test_mcp_call_analyze_route():
+    server = SolanaLensMCPServer()
+    sim_data = {
+        "unitsConsumed": 120_000,
+        "logs": [
+            "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc invoke [1]",
+            "Program log: Instruction: Swap",
+            "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc success",
+        ],
+    }
+    req = {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_analyze_route",
+            "arguments": {
+                "simulation_json": json.dumps(sim_data),
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert "total_hops" in content
+    assert "dexes_involved" in content
+    assert "Orca Whirlpool" in content["dexes_involved"]
+
+
+def test_mcp_call_fee_guide():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_fee_guide",
+            "arguments": {
+                "estimated_cus": 150_000,
+                "tx_type": "dex_swap",
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["tx_type"] == "dex_swap"
+    assert len(content["priority_fee_tiers"]) == 6
+    assert len(content["jito_tip_tiers"]) == 4
 
 
 def test_mcp_unknown_tool():

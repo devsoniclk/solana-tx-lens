@@ -8,8 +8,10 @@ from .cpi_parser import parse_cpi_tree
 from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
 from .error_decoder import decode_solana_error
 from .guard import assess_simulation_health
+from .mev_radar import scan_mev_vulnerabilities
 from .models import SimulationResult
 from .optimizer import optimize_compute_budget
+from .route_analyzer import analyze_swap_route
 
 
 class SolanaSimulator:
@@ -129,4 +131,6 @@ class SolanaSimulator:
         )
 
         result.health = assess_simulation_health(result)
+        result.mev_radar = scan_mev_vulnerabilities(result)
+        result.route = analyze_swap_route(result)
         return result

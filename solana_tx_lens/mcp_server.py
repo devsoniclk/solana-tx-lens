@@ -9,9 +9,12 @@ from .bundle import BundleSimulator
 from .contention import audit_account_contention
 from .cpi_parser import parse_cpi_tree
 from .error_decoder import decode_solana_error
+from .fee_guide import generate_fee_guide
 from .guard import assess_simulation_health
 from .html_report import render_bundle_html_report, render_html_report
+from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
+from .route_analyzer import analyze_swap_route
 from .simulator import SolanaSimulator
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence
 
@@ -153,6 +156,67 @@ class SolanaLensMCPServer:
                     "required": ["simulation_json", "output_path"],
                 },
             },
+            {
+                "name": "solana_mev_radar",
+                "description": "Scan transaction simulation for sandwich attack vulnerabilities, excessive slippage exposure, and frontrunning risks.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "simulation_json": {
+                            "type": "string",
+                            "description": "JSON serialized SimulationResult or raw simulation object with logs.",
+                        },
+                        "slippage_tolerance_bps": {
+                            "type": "integer",
+                            "description": "Optional configured slippage tolerance in basis points (e.g. 50 = 0.50%).",
+                        },
+                        "is_public_mempool": {
+                            "type": "boolean",
+                            "description": "Whether the transaction will be broadcast via public mempool gossip (default: true).",
+                            "default": True,
+                        },
+                    },
+                    "required": ["simulation_json"],
+                },
+            },
+            {
+                "name": "solana_analyze_route",
+                "description": "Reconstruct multi-hop token swap route, intermediate DEX pool hops, effective exchange rates, and cyclic arbitrage loops from simulation logs and token diffs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "simulation_json": {
+                            "type": "string",
+                            "description": "JSON serialized SimulationResult or raw simulation object with logs.",
+                        },
+                    },
+                    "required": ["simulation_json"],
+                },
+            },
+            {
+                "name": "solana_fee_guide",
+                "description": "Generate dynamic multi-tier priority fee and Jito MEV tip recommendations tailored to transaction type, compute limit, and network congestion.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "estimated_cus": {
+                            "type": "integer",
+                            "description": "Estimated compute units consumed (default: 200,000).",
+                            "default": 200000,
+                        },
+                        "tx_type": {
+                            "type": "string",
+                            "description": "Transaction archetype ('transfer', 'dex_swap', 'arbitrage', 'nft_mint', 'generic').",
+                            "default": "dex_swap",
+                        },
+                        "is_bundle": {
+                            "type": "boolean",
+                            "description": "Whether transaction is submitted in an atomic Jito MEV bundle.",
+                            "default": False,
+                        },
+                    },
+                },
+            },
         ]
 
     def handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -264,6 +328,42 @@ class SolanaLensMCPServer:
                     "html_size_bytes": len(html.encode("utf-8")),
                 }
 
+            elif name == "solana_mev_radar":
+                sim_json = arguments["simulation_json"]
+                slippage = arguments.get("slippage_tolerance_bps")
+                public_mempool = arguments.get("is_public_mempool", True)
+                data = json.loads(sim_json)
+
+                if isinstance(data, dict) and ("unitsConsumed" in data or "logs" in data):
+                    res = self.simulator.parse_raw_simulation(data)
+                elif isinstance(data, dict) and "cpi_roots" in data:
+                    res = self.simulator.parse_raw_simulation({"logs": data.get("raw_logs", []), "unitsConsumed": data.get("total_compute_units", 0)})
+                else:
+                    res = self.simulator.parse_raw_simulation(data if isinstance(data, dict) else {"logs": []})
+
+                radar = scan_mev_vulnerabilities(res, slippage_tolerance_bps=slippage, is_public_mempool=public_mempool)
+                return radar.to_dict()
+
+            elif name == "solana_analyze_route":
+                sim_json = arguments["simulation_json"]
+                data = json.loads(sim_json)
+
+                if isinstance(data, dict) and ("unitsConsumed" in data or "logs" in data):
+                    res = self.simulator.parse_raw_simulation(data)
+                else:
+                    res = self.simulator.parse_raw_simulation(data if isinstance(data, dict) else {"logs": []})
+
+                route = analyze_swap_route(res)
+                return route.to_dict()
+
+            elif name == "solana_fee_guide":
+                cus = int(arguments.get("estimated_cus", 200_000))
+                tx_type = str(arguments.get("tx_type", "dex_swap"))
+                is_bundle = bool(arguments.get("is_bundle", False))
+
+                guide = generate_fee_guide(estimated_cus=cus, tx_type=tx_type, is_bundle=is_bundle)
+                return guide.to_dict()
+
             else:
                 return {"error": f"Unknown tool: {name}"}
 
@@ -284,7 +384,7 @@ class SolanaLensMCPServer:
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "solana-tx-lens-mcp",
-                        "version": "0.4.0",
+                        "version": "0.5.0",
                     },
                 },
             }
