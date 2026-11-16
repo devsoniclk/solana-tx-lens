@@ -111,7 +111,7 @@ def test_render_simulation_report_with_token_and_health():
     )
 
     report = render_simulation_report(res)
-    assert "DIAGNOSTIC REPORT (v0.2.0)" in report
+    assert "DIAGNOSTIC REPORT (v0.3.0)" in report
     assert "SPL Token Balance Mutations" in report
     assert "-50.0000" in report
     assert "+0.3500" in report

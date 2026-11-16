@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from typing import Dict, List, Set
 from .models import AccountDiff, CPIInvocation, SimulationResult, TokenBalanceDiff
@@ -121,11 +123,12 @@ def render_cpi_mermaid_flowchart(roots: List[CPIInvocation]) -> str:
 def render_simulation_report(result: SimulationResult) -> str:
     """
     Generates a full diagnostic terminal report for a simulation result,
-    including CPI tree, token mutations, account diffs, and health guard status.
+    including CPI tree, token mutations, account diffs, health guard status,
+    compute budget optimizer, and account contention audit.
     """
     header = [
         "==================================================================",
-        " SOLANA TRANSACTION SIMULATION DIAGNOSTIC REPORT (v0.2.0)",
+        " SOLANA TRANSACTION SIMULATION DIAGNOSTIC REPORT (v0.3.0)",
         "==================================================================",
         f"Status:             {'SUCCESS' if result.success else 'FAILED'}",
         (
@@ -154,6 +157,30 @@ def render_simulation_report(result: SimulationResult) -> str:
             icon = "🔴" if iss.severity == "CRITICAL" else ("🟡" if iss.severity == "WARNING" else "ℹ️")
             header.append(f"  {icon} [{iss.severity}] {iss.check}: {iss.message}")
             header.append(f"     └─ Rec: {iss.recommendation}")
+
+    # Compute Budget & Priority Fee Optimization
+    if result.optimization:
+        opt = result.optimization
+        header.append("\n[Compute Budget & Priority Fee Optimization]")
+        header.append(f"  Recommended Limit:  {opt.recommended_limit:,} CUs (+{int(opt.safety_buffer_pct*100)}% buffer)")
+        header.append(f"  Allocation Savings: {opt.cu_savings:,} CUs ({opt.cu_savings_pct}%) vs {opt.default_limit:,} baseline")
+        header.append(f"  Summary:            {opt.recommendation_summary}")
+        header.append("  Estimated Transaction Fees by Priority Tier:")
+        for tier, cost in opt.estimated_tx_fees_sol.items():
+            u_lamports = opt.priority_fee_micro_lamports.get(tier, 0)
+            header.append(f"    - {tier.capitalize():<7}: {cost:.6f} SOL ({u_lamports:,} µ-lamports/CU)")
+
+    # Account Lock Contention & Parallelism Audit
+    if result.contention:
+        cnt = result.contention
+        header.append("\n[Account Write-Lock Contention & Parallelism]")
+        header.append(f"  Concurrency Verdict:     {cnt.concurrency_verdict}")
+        header.append(f"  Parallelizability Score: {cnt.parallelizability_score:.2f} ({int(cnt.parallelizability_score*100)}%)")
+        header.append(f"  Account Lock Ratios:     {cnt.writable_count} Writable / {cnt.readonly_count} Read-Only (Total: {cnt.total_accounts})")
+        if cnt.hotspot_count > 0:
+            header.append(f"  Locked Shared Hotspots:  {cnt.hotspot_count}")
+        for w in cnt.warnings:
+            header.append(f"  ⚠️ {w}")
 
     header.append("\n[Cross-Program Invocation (CPI) Execution Tree]")
     if result.cpi_roots:

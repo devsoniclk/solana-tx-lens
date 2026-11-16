@@ -1,7 +1,13 @@
+from __future__ import annotations
+
 import dataclasses
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from .contention import ContentionReport
+    from .optimizer import ComputeBudgetOptimization
 
 
 @dataclass
@@ -75,6 +81,8 @@ class SimulationResult:
     token_diffs: List[TokenBalanceDiff] = field(default_factory=list)
     health: Optional[SimulationHealth] = None
     error: Optional[ErrorInfo] = None
+    optimization: Optional[Any] = None
+    contention: Optional[Any] = None
     raw_logs: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -89,3 +97,13 @@ class SimulationResult:
         if diagram_type == "flowchart":
             return render_cpi_mermaid_flowchart(self.cpi_roots)
         return render_cpi_mermaid_sequence(self.cpi_roots)
+
+    def to_html(self, title: str = "Solana Transaction Simulation Dossier") -> str:
+        from .html_report import render_html_report
+
+        return render_html_report(
+            self,
+            optimization=self.optimization,
+            contention=self.contention,
+            title=title,
+        )

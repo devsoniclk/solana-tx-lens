@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import json
 import sys
+from .contention import audit_account_contention
 from .error_decoder import decode_solana_error
+from .html_report import render_html_report
+from .optimizer import optimize_compute_budget
 from .simulator import SolanaSimulator
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence, render_simulation_report
 
@@ -9,7 +14,7 @@ from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequenc
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="sol-lens",
-        description="Headless Solana transaction simulation inspector, CPI visualizer, and pre-flight MEV guard.",
+        description="Headless Solana transaction simulation inspector, CPI visualizer, pre-flight MEV guard, and fee optimizer.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -42,6 +47,48 @@ def main() -> None:
         action="store_true",
         help="Output GitHub-renderable Mermaid flowchart diagram.",
     )
+    p_sim.add_argument(
+        "--html",
+        metavar="FILE",
+        default=None,
+        help="Generate and save a standalone, dark-themed HTML diagnostic dossier.",
+    )
+
+    # optimize command
+    p_opt = subparsers.add_parser(
+        "optimize",
+        help="Compute optimal SetComputeUnitLimit and priority fee tiers.",
+    )
+    p_opt.add_argument(
+        "target",
+        help="Integer compute units consumed, or path to simulation JSON / log file.",
+    )
+    p_opt.add_argument(
+        "--buffer",
+        type=float,
+        default=0.15,
+        help="Safety buffer percentage (default: 0.15 for 15%).",
+    )
+    p_opt.add_argument(
+        "--json",
+        action="store_true",
+        help="Output optimization recommendation as JSON.",
+    )
+
+    # contention command
+    p_cnt = subparsers.add_parser(
+        "contention",
+        help="Audit account write-lock contention and parallel execution bottlenecks.",
+    )
+    p_cnt.add_argument(
+        "target",
+        help="Path to JSON file containing simulation or account keys list.",
+    )
+    p_cnt.add_argument(
+        "--json",
+        action="store_true",
+        help="Output contention audit as JSON.",
+    )
 
     # decode-error command
     p_dec = subparsers.add_parser(
@@ -64,6 +111,76 @@ def main() -> None:
         print(f"Name:         {err_info.name}")
         print(f"Description:  {err_info.description}")
 
+    elif args.command == "optimize":
+        sim_cus = 0
+        try:
+            sim_cus = int(args.target)
+        except ValueError:
+            # Try reading as file
+            with open(args.target, "r") as f:
+                content = f.read().strip()
+                try:
+                    data = json.loads(content)
+                    sim_cus = data.get("unitsConsumed") or data.get("total_compute_units", 0)
+                except json.JSONDecodeError:
+                    # Search logs for consumed
+                    for line in content.splitlines():
+                        if "consumed" in line and "compute units" in line:
+                            parts = line.split("consumed")[-1].split("of")[0].strip()
+                            try:
+                                sim_cus = int(parts)
+                                break
+                            except ValueError:
+                                pass
+
+        opt = optimize_compute_budget(sim_cus, safety_buffer_pct=args.buffer)
+        if args.json:
+            print(json.dumps(opt.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" COMPUTE BUDGET & PRIORITY FEE OPTIMIZER")
+            print("==================================================")
+            print(f"Simulated CUs:      {opt.simulated_cus:,}")
+            print(f"Recommended Limit:  {opt.recommended_limit:,} CUs (+{int(opt.safety_buffer_pct*100)}% buffer)")
+            print(f"Baseline Limit:     {opt.default_limit:,} CUs")
+            print(f"Savings:            {opt.cu_savings:,} CUs ({opt.cu_savings_pct}%)")
+            print(f"\n{opt.recommendation_summary}\n")
+            print("Estimated Transaction Fees by Priority Tier:")
+            for tier, sol_fee in opt.estimated_tx_fees_sol.items():
+                ul = opt.priority_fee_micro_lamports.get(tier, 0)
+                print(f"  - {tier.capitalize():<7}: {sol_fee:.6f} SOL ({ul:,} µ-lamports/CU)")
+            print("==================================================")
+
+    elif args.command == "contention":
+        with open(args.target, "r") as f:
+            data = json.load(f)
+
+        keys = data if isinstance(data, list) else (data.get("accountKeys") or data.get("accounts") or [])
+        formatted_keys = []
+        for k in keys:
+            if isinstance(k, dict):
+                formatted_keys.append(k)
+            elif isinstance(k, str):
+                formatted_keys.append({"pubkey": k, "signer": False, "writable": True})
+
+        logs = data.get("logs", []) if isinstance(data, dict) else []
+        cnt = audit_account_contention(formatted_keys, raw_logs=logs)
+        if args.json:
+            print(json.dumps(cnt.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" ACCOUNT WRITE-LOCK CONTENTION & PARALLELISM AUDIT")
+            print("==================================================")
+            print(f"Concurrency Verdict:     {cnt.concurrency_verdict}")
+            print(f"Parallelizability Score: {cnt.parallelizability_score:.2f} ({int(cnt.parallelizability_score*100)}%)")
+            print(f"Accounts:                {cnt.writable_count} Writable / {cnt.readonly_count} Read-Only (Total: {cnt.total_accounts})")
+            print(f"Hotspot Locks:           {cnt.hotspot_count}")
+            if cnt.warnings:
+                print("\nWarnings:")
+                for w in cnt.warnings:
+                    print(f"  ⚠️ {w}")
+            print("==================================================")
+
     elif args.command == "simulate":
         sim_val = None
         try:
@@ -83,7 +200,12 @@ def main() -> None:
         else:
             res = sim.simulate_encoded_transaction(args.target)
 
-        if args.json:
+        if args.html:
+            html_content = res.to_html(title="Solana Transaction Simulation Dossier")
+            with open(args.html, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            print(f"Diagnostic HTML dossier written to: {args.html}")
+        elif args.json:
             print(res.to_json(indent=2))
         elif args.mermaid:
             print(res.to_mermaid(diagram_type="sequence"))

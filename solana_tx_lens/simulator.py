@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 import json
 import urllib.request
 from typing import Any, Dict, List, Optional
+from .contention import audit_account_contention
 from .cpi_parser import parse_cpi_tree
 from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
 from .error_decoder import decode_solana_error
 from .guard import assess_simulation_health
 from .models import SimulationResult
+from .optimizer import optimize_compute_budget
 
 
 class SolanaSimulator:
@@ -32,6 +36,10 @@ class SolanaSimulator:
                     "encoding": "base64",
                     "sigVerify": False,
                     "replaceRecentBlockhash": True,
+                    "accounts": {
+                        "encoding": "base64",
+                        "addresses": [],
+                    },
                 },
             ],
         }
@@ -57,10 +65,12 @@ class SolanaSimulator:
         pre_accounts: Optional[List[Dict[str, Any]]] = None,
         pre_token_balances: Optional[List[Dict[str, Any]]] = None,
         post_token_balances: Optional[List[Dict[str, Any]]] = None,
+        account_keys: Optional[List[Dict[str, Any]]] = None,
     ) -> SimulationResult:
         """
         Parses a raw RPC simulation value dictionary into a structured SimulationResult,
-        including account diffs, token balance deltas, and pre-flight security health checks.
+        including account diffs, token balance deltas, pre-flight security health checks,
+        dynamic compute budget optimization, and write-lock contention audit.
         """
         logs = sim_value.get("logs", []) or []
         err = sim_value.get("err")
@@ -88,10 +98,22 @@ class SolanaSimulator:
             error_info = decode_solana_error(err, failing_prog)
 
         max_cus = 200_000 if units_consumed <= 200_000 else 1_400_000
-        # If ComputeBudget was used in transaction, detect requested limit from logs if present
-        for line in logs:
-            if "SetComputeUnitLimit" in line:
-                pass
+
+        # Compute budget optimization
+        optimization = optimize_compute_budget(units_consumed, default_limit=max_cus)
+
+        # Contention audit
+        keys = account_keys or sim_value.get("accountKeys") or sim_value.get("accounts")
+        contention = None
+        if keys and isinstance(keys, list):
+            # Format could be list of dicts or list of strings
+            formatted_keys = []
+            for k in keys:
+                if isinstance(k, dict):
+                    formatted_keys.append(k)
+                elif isinstance(k, str):
+                    formatted_keys.append({"pubkey": k, "signer": False, "writable": True})
+            contention = audit_account_contention(formatted_keys, raw_logs=logs)
 
         result = SimulationResult(
             success=(err is None),
@@ -101,6 +123,8 @@ class SolanaSimulator:
             account_diffs=account_diffs,
             token_diffs=token_diffs,
             error=error_info,
+            optimization=optimization,
+            contention=contention,
             raw_logs=logs,
         )
 
