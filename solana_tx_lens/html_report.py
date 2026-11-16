@@ -311,3 +311,140 @@ pre {{ background: #0d1117; border: 1px solid var(--border); padding: 12px; bord
 </body>
 </html>
 """
+
+
+def render_bundle_html_report(bundle: Any, title: str = "Solana Atomic Bundle Simulation Dossier") -> str:
+    status_cls = "success" if bundle.success else "failure"
+    status_text = "ATOMIC BUNDLE PASSED" if bundle.success else f"BUNDLE REVERTED (Tx #{bundle.reverted_at_index})"
+    status_color = "var(--green)" if bundle.success else "var(--red)"
+
+    tip = bundle.jito_tip
+    tip_badge = ""
+    if tip and tip.is_valid_jito_tip:
+        tip_badge = f"<span class='badge' style='background: #238636; color: #fff;'>JITO TIP: {tip.tip_sol:.4f} SOL ({tip.tip_tier.upper()})</span>"
+    else:
+        tip_badge = "<span class='badge' style='background: #30363d; color: var(--text-dim);'>NO JITO TIP</span>"
+
+    warnings_html = ""
+    if bundle.bundle_contention_warnings:
+        warn_items = "".join(f"<li>⚠️ {html.escape(w)}</li>" for w in bundle.bundle_contention_warnings)
+        warnings_html = f"""
+        <div class="card" style="border-left: 4px solid var(--yellow);">
+            <h3 style="color: var(--yellow);">⚠️ Cross-Transaction Write-Lock Warnings</h3>
+            <ul style="margin-left: 20px; color: var(--text);">{warn_items}</ul>
+        </div>
+        """
+
+    tx_rows = []
+    for idx, tx in enumerate(bundle.transactions):
+        tx_status = "<span class='badge' style='background: #238636; color: #fff;'>SUCCESS</span>" if tx.success else "<span class='badge' style='background: #da3633; color: #fff;'>FAILED</span>"
+        err_msg = html.escape(tx.error.description) if tx.error else "-"
+        tx_rows.append(
+            f"<tr><td>#{idx}</td><td>{tx_status}</td><td>{tx.total_compute_units:,}</td><td>{len(tx.cpi_roots)}</td><td>{len(tx.account_diffs)}</td><td>{err_msg}</td></tr>"
+        )
+    tx_table = "".join(tx_rows) or "<tr><td colspan='6' style='text-align: center; color: var(--text-dim);'>No transactions</td></tr>"
+
+    acc_rows = []
+    for diff in bundle.cumulative_account_diffs:
+        delta_cls = "delta-pos" if diff.lamports_delta > 0 else ("delta-neg" if diff.lamports_delta < 0 else "")
+        delta_str = f"{diff.lamports_delta:+,} lamports ({diff.lamports_delta / 1e9:+.4f} SOL)"
+        acc_rows.append(
+            f"<tr><td><code>{html.escape(diff.pubkey)}</code></td><td>{diff.pre_lamports:,}</td><td>{diff.post_lamports:,}</td><td class='{delta_cls}'>{delta_str}</td><td><code>{html.escape(diff.post_owner[:8])}...</code></td></tr>"
+        )
+    acc_table = "".join(acc_rows) or "<tr><td colspan='5' style='text-align: center; color: var(--text-dim);'>No cumulative account balance mutations</td></tr>"
+
+    tok_rows = []
+    for t_diff in bundle.cumulative_token_diffs:
+        delta_cls = "delta-pos" if t_diff.delta > 0 else ("delta-neg" if t_diff.delta < 0 else "")
+        sym = f" ({html.escape(t_diff.symbol)})" if t_diff.symbol else ""
+        tok_rows.append(
+            f"<tr><td><code>{html.escape(t_diff.account)}</code></td><td><code>{html.escape(t_diff.mint)}</code>{sym}</td><td><code>{html.escape(t_diff.owner)}</code></td><td>{t_diff.pre_amount:.4f}</td><td>{t_diff.post_amount:.4f}</td><td class='{delta_cls}'>{t_diff.delta:+.4f}</td></tr>"
+        )
+    tok_table = "".join(tok_rows) or "<tr><td colspan='6' style='text-align: center; color: var(--text-dim);'>No cumulative token transfers</td></tr>"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}</title>
+<style>
+:root {{
+    --bg: #0d1117;
+    --card-bg: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --heading: #f0f6fc;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.5; padding: 24px; max-width: 1200px; margin: 0 auto; }}
+h1, h2, h3 {{ color: var(--heading); margin-bottom: 12px; }}
+h1 {{ display: flex; align-items: center; gap: 12px; font-size: 24px; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; }}
+.card {{ background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }}
+.badge {{ display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; }}
+.stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px; }}
+.stat {{ background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }}
+.stat .label {{ font-size: 11px; text-transform: uppercase; color: var(--text-dim); display: block; margin-bottom: 4px; }}
+.stat .val {{ font-size: 20px; font-weight: bold; color: var(--heading); }}
+table {{ width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }}
+th, td {{ padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }}
+th {{ background: rgba(255,255,255,0.04); color: var(--text-dim); font-size: 11px; text-transform: uppercase; }}
+code {{ font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--accent); }}
+.delta-pos {{ color: var(--green); font-weight: 600; }}
+.delta-neg {{ color: var(--red); font-weight: 600; }}
+</style>
+</head>
+<body>
+
+<h1>
+    <span>⚡ {html.escape(title)}</span>
+    <span class="badge" style="background: {status_color}; color: #fff;">{status_text}</span>
+    {tip_badge}
+</h1>
+
+<div class="card">
+    <h3>📦 Atomic Bundle Overview</h3>
+    <p style="color: var(--text);">{html.escape(bundle.summary)}</p>
+    <div class="stats-grid">
+        <div class="stat"><span class="label">Transactions</span><span class="val">{bundle.transaction_count}</span></div>
+        <div class="stat"><span class="label">Cumulative Compute Units</span><span class="val">{bundle.total_compute_units:,}</span></div>
+        <div class="stat"><span class="label">Jito Tip Amount</span><span class="val">{tip.tip_sol:.4f} SOL</span></div>
+        <div class="stat"><span class="label">Cumulative Mutated Accounts</span><span class="val">{len(bundle.cumulative_account_diffs)}</span></div>
+    </div>
+</div>
+
+{warnings_html}
+
+<div class="card">
+    <h3>⏱️ Transaction Execution Timeline</h3>
+    <table>
+        <thead><tr><th>Tx #</th><th>Status</th><th>Compute Units</th><th>CPI Roots</th><th>Account Mutations</th><th>Error</th></tr></thead>
+        <tbody>{tx_table}</tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>💰 Net Cumulative SOL & Account Mutations</h3>
+    <table>
+        <thead><tr><th>Account Pubkey</th><th>Pre-Lamports</th><th>Post-Lamports</th><th>Net Delta</th><th>Owner</th></tr></thead>
+        <tbody>{acc_table}</tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>🪙 Net Cumulative SPL Token Balance Transfers</h3>
+    <table>
+        <thead><tr><th>Token Account</th><th>Mint</th><th>Owner</th><th>Pre Amount</th><th>Post Amount</th><th>Net Delta</th></tr></thead>
+        <tbody>{tok_table}</tbody>
+    </table>
+</div>
+
+</body>
+</html>
+"""

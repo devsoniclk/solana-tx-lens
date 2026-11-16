@@ -1,29 +1,32 @@
 # solana-tx-lens
 
-> **Headless transaction simulation inspector, CPI tree visualizer, pre-flight MEV guard, dynamic compute budget optimizer, and account write-lock contention auditor for Solana.**
+> **Headless transaction simulation inspector, CPI tree visualizer, pre-flight MEV guard, dynamic compute budget optimizer, account write-lock contention auditor, atomic Jito bundle simulator, and Model Context Protocol (MCP) server for Solana.**
 
 [![CI](https://github.com/devsoniclk/solana-tx-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/devsoniclk/solana-tx-lens/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/solana-tx-lens/)
-[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
+[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
 
 ---
 
 ## 1. Problem Statement
-Debugging Solana transaction simulation failures is notoriously frustrating. When a transaction reverts in pre-flight, developers and trading bots receive cryptic error payloads like `InstructionError(0, Custom(6001))` or `ComputationalBudgetExceeded` without context. Furthermore, over-allocating Compute Units (CUs) wastes priority fees, and transactions that write-lock contended hotspot accounts (e.g. shared DEX pool vaults, sysvars) suffer severe landing latencies or drop during slot congestion.
+Debugging Solana transaction simulation failures is notoriously frustrating. When a transaction reverts in pre-flight, developers, trading bots, and AI agents receive cryptic error payloads like `InstructionError(0, Custom(6001))` or `ComputationalBudgetExceeded` without context. Over-allocating Compute Units (CUs) wastes priority fees, and transactions that write-lock contended hotspot accounts (e.g. shared DEX pool vaults, sysvars) suffer severe landing latencies. Furthermore, multi-transaction MEV bundles (such as Jito bundles) require atomic simulation, tip verification, and cross-transaction write-lock contention analysis before broadcast.
 
 ## 2. Why Existing Solutions Are Insufficient
 - **Solana CLI (`solana confirm -v`)**: Emits flat unstructured text logs, does not reconstruct nested Cross-Program Invocation (CPI) call graphs, and leaves custom program errors undecoded.
 - **Solana Explorer / Solscan**: Only inspects mined transactions. Cannot debug pre-flight simulated transactions or private Jito MEV bundles before broadcast.
 - **Anchor CLI**: Requires a local workspace and source IDL; cannot dynamically decode arbitrary third-party DEX programs (Raydium, Whirlpool, Pump.fun, Jupiter).
 - **Manual Compute Allocation**: Developers hardcode 200,000 or 1,400,000 CUs, overpaying priority fees by 40–80% or risking random `OutOfComputeUnits` drops.
+- **Lack of Agent Integration**: AI trading agents and wallet copilots lack standard Model Context Protocol (MCP) tools to inspect simulations and audit bundles headlessly.
 
 ## 3. What `solana-tx-lens` Does Differently
 `solana-tx-lens` provides a **lightweight, headless simulation & diagnostic engine** with zero validator overhead:
+- **Model Context Protocol (MCP) Server**: Provides standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Atomic Jito / MEV Bundle Simulator**: Simulates multi-transaction sequences in atomic order, tracking cumulative CUs, verifying Jito tip accounts, detecting cross-transaction balance transitions, and auditing cross-tx write lock collisions.
 - **Nested CPI Execution Tree**: Reconstructs multi-level Cross-Program Invocations (`invoke [1]`, `invoke [2]`, `invoke [3]`) into an ASCII/JSON call graph with program names and recognized instructions (`swap_exact_in`, `buy`, `TransferChecked`).
 - **Dynamic Compute Budget & Priority Fee Optimizer**: Calculates exact optimal `SetComputeUnitLimit` (with configurable safety buffer) and projects fees across priority tiers (Min, Low, Medium, High, Ultra), slashing excess CU fees by up to 75%.
 - **Account Write-Lock Contention & Parallelism Auditor**: Identifies write-locked hotspot accounts (shared AMM pools, Raydium/Orca vaults, sysvars), scores parallelizability (0.0 to 1.0), and alerts on lock contention that serializes Sealevel runtime execution.
-- **Interactive Dark-Mode HTML Diagnostic Dossier**: Generates self-contained, dependency-free HTML diagnostic reports (`--html report.html`) featuring collapsible CPI tree nodes, balance delta badges, and copyable Mermaid diagram sources.
+- **Interactive Dark-Mode HTML Diagnostic Dossier**: Generates self-contained, dependency-free HTML diagnostic reports (`--html report.html`) featuring collapsible CPI tree nodes, balance delta badges, bundle timelines, and copyable Mermaid diagram sources.
 - **Pre-flight MEV & Safety Guard**: Evaluates transaction health prior to broadcast. Flags CU exhaustion risks (>85% limit), slippage breaches (0x1771/6001), asymmetric token drains (sandwich/front-run detection), and missing priority fees.
 - **GitHub-Renderable Mermaid Diagrams**: Automatically exports execution call graphs into clean Mermaid sequence diagrams (`--mermaid`) and flowcharts (`--flowchart`).
 - **SPL Token Balance Mutations**: Calculates pre- vs. post-simulation token balance deltas (e.g. `-100.00 USDC`, `+1.25 SOL`) across all affected accounts.
@@ -33,15 +36,15 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 ---
 
 ## 4. Key Features
+- **MCP Server for AI Agents**: Plug-and-play JSON-RPC 2.0 interface for AI trading and coding agents.
+- **Atomic Bundle Simulator**: Cumulative CUs, Jito tip validation, and cross-tx state transitions.
 - **Simulation Diagnostics**: Inspect arbitrary base64 transactions via RPC or parse raw JSON simulation outputs.
 - **Compute Budget Right-Sizing**: Exact CU limit and priority fee recommendations per transaction.
 - **Account Lock Contention Audit**: Prevent transaction serialisation bottlenecks by auditing writable locks.
 - **Self-Contained HTML Dossiers**: Offline, dark-themed HTML diagnostic visualizer with zero external CDN scripts.
 - **Pre-flight MEV Safety Guard**: Built-in automated risk analysis detecting out-of-gas vulnerability, sandwich attacks, and rent exemption issues.
 - **Mermaid Export**: Copy-pasteable sequence diagrams for PRs, issues, and audit documentation.
-- **CLI & Python SDK**: Use via terminal command (`sol-lens`) or embed into automated trading bot pre-flight loops.
-- **Jito & MEV Ready**: Diagnose bundles and atomic arbitrage transactions before broadcasting to protect priority fees.
-- **Extensible Error & Program Registry**: Built-in definitions for Anchor, System, Token, Token-2022, Raydium (AMM/CLMM/CPMM), Whirlpool, OpenBook, Phoenix, and Pump.fun.
+- **CLI & Python SDK**: Use via terminal command (`sol-lens`) or embed into automated trading bots and pipelines.
 
 ---
 
@@ -49,21 +52,27 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 
 ```mermaid
 flowchart TD
-    A["Raw Transaction / Base64 Payload"] -->|"simulateTransaction"| B["Solana JSON-RPC"]
-    B -->|"Logs, Balances, & Account States"| C["SolanaSimulator"]
-    C --> D["cpi_parser & instruction_decoder"]
-    C --> E["error_decoder"]
-    C --> F["diff_engine (SOL & SPL Tokens)"]
-    C --> G["guard (Pre-flight MEV & Health)"]
-    C --> J["optimizer (Compute Budget & Fees)"]
-    C --> K["contention (Write-Lock Auditor)"]
-    D -->|"Nested Tree & CU Breakdown"| H["visualizer & html_report"]
-    E -->|"Decoded Anchor / DEX Errors"| H
-    F -->|"Lamports & SPL Token Diffs"| H
-    G -->|"Risk Scores & Warnings"| H
-    J -->|"Optimal CUs & Fee Tiers"| H
-    K -->|"Concurrency Verdict & Hotspots"| H
-    H --> I["Structured Diagnostic Report (CLI / JSON / HTML / Mermaid)"]
+    RawTx["Base64 Transaction / Raw Simulation JSON"] --> Simulator["SolanaSimulator / BundleSimulator"]
+    Simulator --> CPIParser["CPI Invocation Parser (Log Stream)"]
+    Simulator --> DiffEngine["Account & Token Mutation Engine"]
+    Simulator --> ErrorDecoder["Anchor & DEX Custom Error Decoder"]
+    Simulator --> Guard["Pre-flight MEV & Safety Guard"]
+    Simulator --> Optimizer["Dynamic Compute Budget Optimizer"]
+    Simulator --> Contention["Account Write-Lock Contention Auditor"]
+    Simulator --> JitoTip["Jito Tip & Bundle Atomicity Engine"]
+
+    CPIParser --> Res["SimulationResult / BundleSimulationResult"]
+    DiffEngine --> Res
+    ErrorDecoder --> Res
+    Guard --> Res
+    Optimizer --> Res
+    Contention --> Res
+    JitoTip --> Res
+
+    Res --> CLI["sol-lens CLI"]
+    Res --> MCP["Model Context Protocol (MCP) Server"]
+    Res --> HTML["Interactive Dark-Mode HTML Dossier"]
+    Res --> MermaidSeq["GitHub Mermaid Sequence Diagram"]
 ```
 
 ---
@@ -74,7 +83,7 @@ flowchart TD
 pip install solana-tx-lens
 ```
 
-Or install from source:
+Or from source:
 ```bash
 git clone https://github.com/devsoniclk/solana-tx-lens.git
 cd solana-tx-lens
@@ -83,42 +92,49 @@ pip install -e .
 
 ---
 
-## 7. Quick-Start Guide
+## 7. Model Context Protocol (MCP) Setup
 
-### Python SDK
-```python
-from solana_tx_lens import (
-    SolanaSimulator,
-    render_simulation_report,
-    optimize_compute_budget,
-    audit_account_contention,
-)
+AI agents (such as Claude Code, OpenBot, Cursor, and Cline) can use `solana-tx-lens` as an MCP server to simulate transactions and audit bundles prior to signing.
 
-# 1. Initialize simulator with your RPC
-simulator = SolanaSimulator(rpc_url="https://api.mainnet-beta.solana.com")
+Add to your MCP configuration (`claude_desktop_config.json` or `mcpSettings.json`):
 
-# 2. Simulate raw base64 transaction
-result = simulator.simulate_encoded_transaction("<base64_tx_payload>")
-
-# 3. Print diagnostic report with CU optimizer & lock contention
-print(render_simulation_report(result))
-
-# 4. Export self-contained Dark-Mode HTML dossier
-html_dossier = result.to_html(title="Arbitrage Bot Pre-Flight Audit")
-with open("audit_report.html", "w") as f:
-    f.write(html_dossier)
-
-# 5. Right-size Compute Budget before broadcast
-opt = optimize_compute_budget(result.total_compute_units, safety_buffer_pct=0.15)
-print(f"SetComputeUnitLimit({opt.recommended_limit}) -> Saves {opt.cu_savings_pct}% fees!")
+```json
+{
+  "mcpServers": {
+    "solana-tx-lens": {
+      "command": "sol-lens",
+      "args": ["mcp", "--rpc", "https://api.mainnet-beta.solana.com"]
+    }
+  }
+}
 ```
+
+Available MCP Tools:
+- `solana_simulate`: Full transaction simulation, CPI tree parsing, balance diffs, and error decoding.
+- `solana_inspect_cpi`: Parse log streams into recursive CPI graphs and Mermaid diagrams.
+- `solana_optimize_cu`: Right-size `SetComputeUnitLimit` and estimate priority fees.
+- `solana_audit_contention`: Audit account write-locks and identify concurrency bottlenecks.
+- `solana_audit_guard`: Run pre-flight safety checks (slippage, drain, signer authorization).
+- `solana_simulate_bundle`: Simulate atomic multi-transaction Jito/MEV bundles.
+- `solana_generate_dossier`: Generate the standalone dark-mode HTML inspection dossier.
 
 ---
 
 ## 8. CLI Usage
 
 ```bash
-# Inspect a simulation log file or JSON output
+# Start standard Model Context Protocol (MCP) server
+sol-lens mcp
+
+# Simulate and analyze an atomic multi-transaction bundle
+sol-lens bundle bundle.json
+sol-lens bundle bundle.json --json
+sol-lens bundle bundle.json --html bundle_dossier.html
+
+# Simulate an encoded base64 transaction string
+sol-lens simulate <BASE64_TX>
+
+# Parse an offline simulation log file or JSON output
 sol-lens simulate simulation_dump.json
 
 # Generate an offline, dark-themed interactive HTML diagnostic dossier
@@ -139,61 +155,35 @@ sol-lens simulate simulation_dump.json --json
 
 # Decode a numeric or hex Solana error code
 sol-lens decode-error 6001
-# Output:
-# Error Type:   DEX
-# Error Code:   6001 (0x1771)
-# Name:         SlippageExceeded
-# Description:  Slippage tolerance exceeded; output below min expected
 ```
 
 ---
 
-## 9. Sample Terminal Diagnostic Report
+## 9. Python SDK Usage
 
-```
-==================================================================
- SOLANA TRANSACTION SIMULATION DIAGNOSTIC REPORT (v0.3.0)
-==================================================================
-Status:             SUCCESS
-Total Compute Used: 65,000 / 200,000 CUs (32.5%)
-Health Status:      HEALTHY
-CU Utilization:     32.5%
+```python
+from solana_tx_lens import SolanaSimulator, BundleSimulator, optimize_compute_budget
 
-[Pre-flight Safety & MEV Health Checks]
-  ℹ️ [INFO] PRIORITY_FEE_ADVISORY: No Compute Budget priority fee instruction detected in transaction.
-     └─ Rec: Include SetComputeUnitPrice to prioritize bundle inclusion during network congestion.
+# 1. Single Transaction Simulation
+simulator = SolanaSimulator(rpc_url="https://api.mainnet-beta.solana.com")
+result = simulator.parse_raw_simulation(sim_output_dict)
 
-[Compute Budget & Priority Fee Optimization]
-  Recommended Limit:  75,000 CUs (+15% buffer)
-  Allocation Savings: 125,000 CUs (62.5%) vs 200,000 baseline
-  Summary:            Optimize limit to 75,000 CUs (+15% buffer). Saves 125,000 CUs (62.5%) vs 200,000 allocation.
-  Estimated Transaction Fees by Priority Tier:
-    - Min    : 0.000005 SOL (0 µ-lamports/CU)
-    - Low    : 0.000005 SOL (1,000 µ-lamports/CU)
-    - Medium : 0.000006 SOL (25,000 µ-lamports/CU)
-    - High   : 0.000012 SOL (100,000 µ-lamports/CU)
-    - Ultra  : 0.000042 SOL (500,000 µ-lamports/CU)
+print(f"Status: {result.success}")
+print(f"Compute Units: {result.total_compute_units:,}")
+print(result.to_html(title="Transaction Dossier"))
 
-[Account Write-Lock Contention & Parallelism]
-  Concurrency Verdict:     HIGHLY_PARALLELIZABLE
-  Parallelizability Score: 0.85 (85%)
-  Account Lock Ratios:     2 Writable / 6 Read-Only (Total: 8)
+# 2. Atomic Multi-Transaction Bundle Simulation
+bundle_sim = BundleSimulator()
+bundle_result = bundle_sim.simulate_bundle([tx1_dict, tx2_dict])
 
-[Cross-Program Invocation (CPI) Execution Tree]
-└── [OK] Raydium AMM v4 (675k...1Mp8) [depth 1] -> swap_exact_in (65,000 CUs)
-    └── [OK] SPL Token (Toke...5DA) [depth 2] -> TransferChecked (4,600 CUs)
+print(f"Bundle Success: {bundle_result.success}")
+print(f"Cumulative CUs: {bundle_result.total_compute_units:,}")
+if bundle_result.jito_tip.is_valid_jito_tip:
+    print(f"Jito Tip: {bundle_result.jito_tip.tip_sol:.4f} SOL")
 
-[SPL Token Balance Mutations]
-  Token Mint / Account                         | Token Delta        | Owner
-  ---------------------------------------------------------------------------
-  EPjFWdd5AufqSSqeM2qN...                      | -50.0000           | Owner1
-  So111111111111111111...                      | +0.3500            | Owner1
-
-[Account State Diffs]
-  Account Pubkey                               | Lamports Delta   | Data Delta
-  ---------------------------------------------------------------------------
-  User11111111111111111111111111111111111111   | -0.000005 SOL    | +0 bytes
-==================================================================
+# 3. Dynamic Compute Budget Optimization
+opt = optimize_compute_budget(result.total_compute_units, safety_buffer_pct=0.15)
+print(f"Recommended Limit: {opt.recommended_limit} CUs (Saves {opt.cu_savings_pct}%)")
 ```
 
 ---
@@ -208,6 +198,7 @@ Measured on Apple Silicon (M5 Air):
 | **CPI Tree Construction (depth 4)** | `0.28 ms` | `< 0.8 MB` |
 | **Compute Budget Optimization** | `0.04 ms` | `< 0.1 MB` |
 | **Account Contention Audit** | `0.09 ms` | `< 0.2 MB` |
+| **Bundle Simulation (3 txs)** | `0.65 ms` | `< 1.2 MB` |
 | **HTML Dossier Generation** | `0.35 ms` | `< 0.9 MB` |
 | **SPL Token & Lamport Diffing** | `0.15 ms` | `< 0.5 MB` |
 | **MEV Safety Guard Evaluation** | `0.06 ms` | `< 0.2 MB` |
@@ -231,6 +222,8 @@ Measured on Apple Silicon (M5 Air):
 - [x] Dynamic Compute Budget limit & Priority Fee optimizer (`optimize_compute_budget`).
 - [x] Account write-lock contention & Sealevel parallelism auditor (`audit_account_contention`).
 - [x] Self-contained dark-mode interactive HTML diagnostic dossier (`to_html()`).
+- [x] Atomic Jito / MEV Bundle Simulator & Tip Analyzer (`BundleSimulator`).
+- [x] Model Context Protocol (MCP) Server (`SolanaLensMCPServer`, `sol-lens mcp`).
 - [ ] Automatic on-chain Anchor IDL fetcher from program account data.
 
 ---

@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from .bundle import BundleSimulator
 from .contention import audit_account_contention
 from .error_decoder import decode_solana_error
-from .html_report import render_html_report
+from .html_report import render_bundle_html_report, render_html_report
+from .mcp_server import SolanaLensMCPServer
 from .optimizer import optimize_compute_budget
 from .simulator import SolanaSimulator
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence, render_simulation_report
@@ -14,7 +16,7 @@ from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequenc
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="sol-lens",
-        description="Headless Solana transaction simulation inspector, CPI visualizer, pre-flight MEV guard, and fee optimizer.",
+        description="Headless Solana transaction simulation inspector, CPI visualizer, pre-flight MEV guard, fee optimizer, atomic bundle simulator, and MCP server.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -52,6 +54,43 @@ def main() -> None:
         metavar="FILE",
         default=None,
         help="Generate and save a standalone, dark-themed HTML diagnostic dossier.",
+    )
+
+    # bundle command
+    p_bnd = subparsers.add_parser(
+        "bundle",
+        help="Simulate and analyze an atomic multi-transaction bundle (e.g. Jito MEV bundle).",
+    )
+    p_bnd.add_argument(
+        "target",
+        help="Path to JSON file containing array of transaction simulation objects in sequential execution order.",
+    )
+    p_bnd.add_argument(
+        "--rpc",
+        default="https://api.mainnet-beta.solana.com",
+        help="Solana RPC endpoint.",
+    )
+    p_bnd.add_argument(
+        "--json",
+        action="store_true",
+        help="Output full bundle simulation result as JSON.",
+    )
+    p_bnd.add_argument(
+        "--html",
+        metavar="FILE",
+        default=None,
+        help="Generate and save a standalone, dark-themed HTML diagnostic dossier for the bundle.",
+    )
+
+    # mcp command
+    p_mcp = subparsers.add_parser(
+        "mcp",
+        help="Run the standard Model Context Protocol (MCP) JSON-RPC stdio server for AI agents.",
+    )
+    p_mcp.add_argument(
+        "--rpc",
+        default="https://api.mainnet-beta.solana.com",
+        help="Solana RPC endpoint.",
     )
 
     # optimize command
@@ -100,7 +139,63 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "decode-error":
+    if args.command == "mcp":
+        server = SolanaLensMCPServer(rpc_url=args.rpc)
+        server.run_stdio()
+
+    elif args.command == "bundle":
+        with open(args.target, "r") as f:
+            data = json.load(f)
+
+        txs = data if isinstance(data, list) else data.get("transactions", [])
+        bsim = BundleSimulator(rpc_url=args.rpc)
+        res = bsim.simulate_bundle(txs)
+
+        if args.html:
+            html_content = res.to_html(title="Solana Atomic Bundle Simulation Dossier")
+            with open(args.html, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            print(f"Bundle diagnostic HTML dossier written to: {args.html}")
+        elif args.json:
+            print(res.to_json(indent=2))
+        else:
+            print("==================================================")
+            print(" ATOMIC MULTI-TRANSACTION BUNDLE SIMULATION")
+            print("==================================================")
+            status_str = "PASSED (ATOMIC)" if res.success else f"REVERTED at Tx #{res.reverted_at_index}"
+            print(f"Status:             {status_str}")
+            print(f"Transactions:       {res.transaction_count}")
+            print(f"Cumulative CUs:     {res.total_compute_units:,}")
+            if res.jito_tip.is_valid_jito_tip:
+                print(f"Jito Tip Detected:  {res.jito_tip.tip_sol:.4f} SOL ({res.jito_tip.tip_lamports:,} lamports) [{res.jito_tip.tip_tier.upper()}]")
+                print(f"Tip Account:        {res.jito_tip.tip_account}")
+            else:
+                print("Jito Tip Detected:  None")
+
+            if res.bundle_contention_warnings:
+                print("\nCross-Tx Contention Warnings:")
+                for w in res.bundle_contention_warnings:
+                    print(f"  ⚠️ {w}")
+
+            print("\nTransaction Execution Timeline:")
+            for idx, tx in enumerate(res.transactions):
+                tx_st = "SUCCESS" if tx.success else "FAILED"
+                err = f" ({tx.error.description})" if tx.error else ""
+                print(f"  [{idx}] {tx_st:<7} | {tx.total_compute_units:,} CUs | CPIs: {len(tx.cpi_roots)} | Accounts: {len(tx.account_diffs)}{err}")
+
+            if res.cumulative_account_diffs:
+                print("\nCumulative Net Account Diffs:")
+                for diff in res.cumulative_account_diffs:
+                    print(f"  - {diff.pubkey[:8]}...{diff.pubkey[-4:]}: {diff.lamports_delta:+,} lamports ({diff.lamports_delta / 1e9:+.4f} SOL)")
+
+            if res.cumulative_token_diffs:
+                print("\nCumulative Net Token Transfers:")
+                for t_diff in res.cumulative_token_diffs:
+                    sym = f" ({t_diff.symbol})" if t_diff.symbol else ""
+                    print(f"  - {t_diff.mint[:8]}...{t_diff.mint[-4:]}{sym}: {t_diff.delta:+.4f}")
+            print("==================================================")
+
+    elif args.command == "decode-error":
         err_info = decode_solana_error(args.code, args.program)
         print(f"Error Type:   {err_info.error_type}")
         print(
@@ -116,14 +211,12 @@ def main() -> None:
         try:
             sim_cus = int(args.target)
         except ValueError:
-            # Try reading as file
             with open(args.target, "r") as f:
                 content = f.read().strip()
                 try:
                     data = json.loads(content)
                     sim_cus = data.get("unitsConsumed") or data.get("total_compute_units", 0)
                 except json.JSONDecodeError:
-                    # Search logs for consumed
                     for line in content.splitlines():
                         if "consumed" in line and "compute units" in line:
                             parts = line.split("consumed")[-1].split("of")[0].strip()
@@ -189,7 +282,6 @@ def main() -> None:
                 try:
                     sim_val = json.loads(content)
                 except json.JSONDecodeError:
-                    # Treat as lines of logs
                     sim_val = {"logs": content.splitlines(), "unitsConsumed": 0, "err": None}
         except (FileNotFoundError, OSError):
             pass

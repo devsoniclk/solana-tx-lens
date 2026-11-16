@@ -178,3 +178,67 @@ def test_cli_contention_subcommand():
         assert "Concurrency Verdict" in res.stdout
     finally:
         Path(tf_path).unlink(missing_ok=True)
+
+
+def test_cli_bundle_subcommand():
+    repo_root = Path(__file__).parent.parent
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
+        json.dump(
+            [
+                {
+                    "unitsConsumed": 25000,
+                    "logs": ["Program 11111111111111111111111111111111 invoke [1]", "Program 11111111111111111111111111111111 success"],
+                },
+                {
+                    "unitsConsumed": 15000,
+                    "logs": ["Program 11111111111111111111111111111111 invoke [1]", "Program 11111111111111111111111111111111 success"],
+                }
+            ],
+            tf,
+        )
+        tf_path = tf.name
+
+    html_out = tempfile.mktemp(suffix=".html")
+    try:
+        # Test CLI text output
+        res = subprocess.run(
+            [sys.executable, "-m", "solana_tx_lens.cli", "bundle", tf_path],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            env={"PYTHONPATH": str(repo_root)},
+        )
+        assert res.returncode == 0
+        assert "ATOMIC MULTI-TRANSACTION BUNDLE SIMULATION" in res.stdout
+        assert "Transactions:       2" in res.stdout
+        assert "40,000" in res.stdout
+
+        # Test CLI JSON output
+        res_j = subprocess.run(
+            [sys.executable, "-m", "solana_tx_lens.cli", "bundle", tf_path, "--json"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            env={"PYTHONPATH": str(repo_root)},
+        )
+        assert res_j.returncode == 0
+        data = json.loads(res_j.stdout)
+        assert data["success"] is True
+        assert data["transaction_count"] == 2
+        assert data["total_compute_units"] == 40000
+
+        # Test CLI HTML output
+        res_h = subprocess.run(
+            [sys.executable, "-m", "solana_tx_lens.cli", "bundle", tf_path, "--html", html_out],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            env={"PYTHONPATH": str(repo_root)},
+        )
+        assert res_h.returncode == 0
+        assert Path(html_out).exists()
+        content = Path(html_out).read_text(encoding="utf-8")
+        assert "Solana Atomic Bundle Simulation Dossier" in content
+    finally:
+        Path(tf_path).unlink(missing_ok=True)
+        Path(html_out).unlink(missing_ok=True)
