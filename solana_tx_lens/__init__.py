@@ -16,6 +16,14 @@ from .contention import AccountAccess, ContentionReport, audit_account_contentio
 from .cpi_parser import parse_cpi_tree
 from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
 from .error_decoder import decode_solana_error
+from .events import (
+    AnchorEventDecoder,
+    DecodedAnchorEvent,
+    ProgramEventsReport,
+    ProgramReturnData,
+    compute_anchor_event_discriminator,
+    decode_program_events_and_returns,
+)
 from .fee_guide import JitoTipTier, PriorityFeeTier, SolanaFeeGuide, generate_fee_guide
 from .guard import assess_simulation_health
 from .html_report import render_bundle_html_report, render_html_report
@@ -34,6 +42,20 @@ from .models import (
 from .optimizer import ComputeBudgetOptimization, optimize_compute_budget
 from .route_analyzer import SwapHop, SwapRouteReport, analyze_swap_route, render_route_ascii, render_route_mermaid
 from .simulator import SolanaSimulator
+from .snapshot import (
+    AccountSnapshotDelta,
+    ShadowReplaySummary,
+    ShadowStateReplayer,
+    create_account_snapshot_delta,
+)
+from .stress_tester import (
+    CUSensitivityResult,
+    ExecutionSensitivityReport,
+    FeeVolatilityScenario,
+    SlippageSensitivityResult,
+    SlippageStressTester,
+    stress_test_simulation,
+)
 from .visualizer import (
     render_cpi_mermaid_flowchart,
     render_cpi_mermaid_sequence,
@@ -41,7 +63,7 @@ from .visualizer import (
     render_simulation_report,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __all__ = [
     "SolanaSimulator",
     "BundleSimulator",
@@ -68,6 +90,22 @@ __all__ = [
     "render_route_ascii",
     "render_route_mermaid",
     "generate_fee_guide",
+    "decode_program_events_and_returns",
+    "compute_anchor_event_discriminator",
+    "AnchorEventDecoder",
+    "DecodedAnchorEvent",
+    "ProgramReturnData",
+    "ProgramEventsReport",
+    "create_account_snapshot_delta",
+    "ShadowStateReplayer",
+    "AccountSnapshotDelta",
+    "ShadowReplaySummary",
+    "stress_test_simulation",
+    "SlippageStressTester",
+    "ExecutionSensitivityReport",
+    "SlippageSensitivityResult",
+    "CUSensitivityResult",
+    "FeeVolatilityScenario",
     "get_program_label",
     "extract_instruction_name",
     "SimulationResult",

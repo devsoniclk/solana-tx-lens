@@ -9,6 +9,7 @@ from .bundle import BundleSimulator
 from .contention import audit_account_contention
 from .cpi_parser import parse_cpi_tree
 from .error_decoder import decode_solana_error
+from .events import decode_program_events_and_returns
 from .fee_guide import generate_fee_guide
 from .guard import assess_simulation_health
 from .html_report import render_bundle_html_report, render_html_report
@@ -16,6 +17,8 @@ from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
 from .route_analyzer import analyze_swap_route
 from .simulator import SolanaSimulator
+from .snapshot import create_account_snapshot_delta
+from .stress_tester import stress_test_simulation
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence
 
 
@@ -217,6 +220,69 @@ class SolanaLensMCPServer:
                     },
                 },
             },
+            {
+                "name": "solana_decode_events",
+                "description": "Decode Anchor event logs (Program data: <base64>) and program return data (Program return: <program_id> <base64>) from transaction execution logs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "logs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Raw log lines from simulateTransaction or getTransaction RPC.",
+                        },
+                    },
+                    "required": ["logs"],
+                },
+            },
+            {
+                "name": "solana_stress_test",
+                "description": "Stress-test transaction resilience under adverse market conditions: slippage cliff points, compute unit truncation jitter, priority fee surges, and price volatility.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "target": {
+                            "type": "string",
+                            "description": "Base64 transaction or serialized JSON simulation object.",
+                        },
+                        "configured_cu_limit": {
+                            "type": "integer",
+                            "description": "Optional configured compute unit limit to test margin against.",
+                        },
+                        "slippage_bps": {
+                            "type": "integer",
+                            "description": "Optional target slippage tolerance in basis points (default: 50).",
+                            "default": 50,
+                        },
+                    },
+                    "required": ["target"],
+                },
+            },
+            {
+                "name": "solana_shadow_diff",
+                "description": "Compute granular byte-level account snapshot deltas and verify Solana rent-exempt reserves across simulation transitions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pre_accounts": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": "Pre-simulation account states (lamports, owner, data).",
+                        },
+                        "post_accounts": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": "Post-simulation account states (lamports, owner, data).",
+                        },
+                        "account_keys": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of account public keys in index order.",
+                        },
+                    },
+                    "required": ["post_accounts"],
+                },
+            },
         ]
 
     def handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -364,6 +430,37 @@ class SolanaLensMCPServer:
                 guide = generate_fee_guide(estimated_cus=cus, tx_type=tx_type, is_bundle=is_bundle)
                 return guide.to_dict()
 
+            elif name == "solana_decode_events":
+                logs = arguments.get("logs", [])
+                events_rep = decode_program_events_and_returns(logs)
+                return events_rep.to_dict()
+
+            elif name == "solana_stress_test":
+                target = arguments["target"]
+                cu_lim = arguments.get("configured_cu_limit")
+                slip = arguments.get("slippage_bps", 50)
+                try:
+                    data = json.loads(target)
+                except Exception:
+                    data = target
+
+                if isinstance(data, dict) and ("unitsConsumed" in data or "logs" in data):
+                    res = self.simulator.parse_raw_simulation(data)
+                elif isinstance(data, str):
+                    res = self.simulator.simulate_encoded_transaction(data)
+                else:
+                    res = self.simulator.parse_raw_simulation(data if isinstance(data, dict) else {"logs": []})
+
+                stress_rep = stress_test_simulation(res, configured_cu_limit=cu_lim, observed_slippage_bps=slip)
+                return stress_rep.to_dict()
+
+            elif name == "solana_shadow_diff":
+                pre_accs = arguments.get("pre_accounts", [])
+                post_accs = arguments.get("post_accounts", [])
+                acc_keys = arguments.get("account_keys")
+                shadow_rep = create_account_snapshot_delta(pre_accs, post_accs, account_keys=acc_keys)
+                return shadow_rep.to_dict()
+
             else:
                 return {"error": f"Unknown tool: {name}"}
 
@@ -384,7 +481,7 @@ class SolanaLensMCPServer:
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "solana-tx-lens-mcp",
-                        "version": "0.5.0",
+                        "version": "0.6.0",
                     },
                 },
             }

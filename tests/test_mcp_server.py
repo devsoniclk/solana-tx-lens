@@ -18,7 +18,7 @@ def test_mcp_initialize():
     assert resp["id"] == 1
     assert resp["result"]["protocolVersion"] == "2024-11-05"
     assert resp["result"]["serverInfo"]["name"] == "solana-tx-lens-mcp"
-    assert resp["result"]["serverInfo"]["version"] == "0.5.0"
+    assert resp["result"]["serverInfo"]["version"] == "0.6.0"
 
 
 def test_mcp_tools_list():
@@ -240,6 +240,70 @@ def test_mcp_call_fee_guide():
     assert content["tx_type"] == "dex_swap"
     assert len(content["priority_fee_tiers"]) == 6
     assert len(content["jito_tip_tiers"]) == 4
+
+
+def test_mcp_call_decode_events():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_decode_events",
+            "arguments": {
+                "logs": [
+                    "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 invoke [1]",
+                    "Program return: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 VGVzdFJldHVybg==",
+                    "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 success",
+                ]
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["has_return_data"] is True
+    assert content["return_data"]["as_utf8"] == "TestReturn"
+
+
+def test_mcp_call_stress_test():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_stress_test",
+            "arguments": {
+                "target": json.dumps({"unitsConsumed": 80000, "logs": []}),
+                "configured_cu_limit": 100000,
+                "slippage_bps": 50,
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert "robustness_score" in content
+    assert content["risk_tier"] in ("ROBUST", "INSTITUTIONAL", "MODERATE_RISK")
+
+
+def test_mcp_call_shadow_diff():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_shadow_diff",
+            "arguments": {
+                "pre_accounts": [{"pubkey": "Acct1", "lamports": 1000}],
+                "post_accounts": [{"pubkey": "Acct1", "lamports": 5000}],
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["total_accounts_touched"] == 1
+    assert content["total_lamports_delta"] == 4000
 
 
 def test_mcp_unknown_tool():

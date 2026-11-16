@@ -6,6 +6,7 @@ import sys
 from .bundle import BundleSimulator
 from .contention import audit_account_contention
 from .error_decoder import decode_solana_error
+from .events import decode_program_events_and_returns
 from .fee_guide import generate_fee_guide
 from .html_report import render_bundle_html_report, render_html_report
 from .mcp_server import SolanaLensMCPServer
@@ -13,6 +14,8 @@ from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
 from .route_analyzer import analyze_swap_route
 from .simulator import SolanaSimulator
+from .snapshot import create_account_snapshot_delta
+from .stress_tester import stress_test_simulation
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence, render_simulation_report
 
 
@@ -170,6 +173,33 @@ def main() -> None:
     p_fg.add_argument("--type", default="dex_swap", choices=["transfer", "dex_swap", "arbitrage", "nft_mint", "generic"], help="Transaction archetype.")
     p_fg.add_argument("--bundle", action="store_true", help="Calculate fees for Jito MEV bundle.")
     p_fg.add_argument("--json", action="store_true", help="Output fee guide as JSON.")
+
+    # decode-events command
+    p_ev = subparsers.add_parser(
+        "decode-events",
+        help="Decode Anchor event logs (Program data:) and return data (Program return:) from simulation logs.",
+    )
+    p_ev.add_argument("target", help="Log file path or JSON simulation file.")
+    p_ev.add_argument("--json", action="store_true", help="Output events as JSON.")
+
+    # stress-test command
+    p_st = subparsers.add_parser(
+        "stress-test",
+        help="Stress-test transaction resilience against slippage cliffs, CU truncation, and fee surges.",
+    )
+    p_st.add_argument("target", help="Base64 transaction or simulation JSON file.")
+    p_st.add_argument("--rpc", default="https://api.mainnet-beta.solana.com", help="Solana RPC endpoint.")
+    p_st.add_argument("--slippage", type=int, default=50, help="Target slippage tolerance in basis points (default: 50).")
+    p_st.add_argument("--cu-limit", type=int, default=None, help="Configured CU limit to stress-test.")
+    p_st.add_argument("--json", action="store_true", help="Output stress test report as JSON.")
+
+    # shadow-diff command
+    p_sd = subparsers.add_parser(
+        "shadow-diff",
+        help="Compute granular account snapshot byte deltas and verify rent-exemption.",
+    )
+    p_sd.add_argument("target", help="Simulation JSON file containing accounts.")
+    p_sd.add_argument("--json", action="store_true", help="Output account snapshot deltas as JSON.")
 
     args = parser.parse_args()
 
@@ -420,6 +450,139 @@ def main() -> None:
             print("\nSDK / CLI Implementation Snippet:")
             for line in guide.cli_instructions.splitlines():
                 print(f"  {line}")
+            print("==================================================")
+
+    elif args.command == "decode-events":
+        logs = []
+        try:
+            with open(args.target, "r") as f:
+                c = f.read().strip()
+                try:
+                    data = json.loads(c)
+                    logs = data.get("logs", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                except json.JSONDecodeError:
+                    logs = c.splitlines()
+        except Exception:
+            logs = [args.target]
+
+        rep = decode_program_events_and_returns(logs)
+        if args.json:
+            print(rep.to_json(indent=2))
+        else:
+            print("==================================================")
+            print(" PROGRAM RETURN DATA & ANCHOR EVENT LOGS")
+            print("==================================================")
+            print(f"Total Anchor Events Decoded: {rep.total_events_count}")
+            print(f"Has Program Return Data:     {rep.has_return_data}")
+            if rep.return_data:
+                rd = rep.return_data
+                print(f"\nReturn Data:")
+                print(f"  Program ID:  {rd.program_id}")
+                print(f"  Type:        {rd.interpreted_type}")
+                print(f"  Hex:         0x{rd.hex_data}")
+                if rd.as_utf8:
+                    print(f"  String:      \"{rd.as_utf8}\"")
+                if rd.as_u64_le is not None:
+                    print(f"  u64 (LE):    {rd.as_u64_le:,}")
+                if rd.as_u128_le is not None:
+                    print(f"  u128 (LE):   {rd.as_u128_le:,}")
+
+            if rep.anchor_events:
+                print(f"\nDecoded Anchor Events:")
+                for idx, ev in enumerate(rep.anchor_events, 1):
+                    disc_status = "[Catalog Match]" if ev.matched_catalog else "[Unknown Disc]"
+                    print(f"  {idx}. {ev.protocol} :: {ev.event_name} {disc_status}")
+                    print(f"     Discriminator: 0x{ev.discriminator_hex}")
+                    print(f"     Payload Size:  {ev.payload_bytes_len} bytes")
+                    if ev.fields:
+                        print(f"     Fields:        {ev.fields}")
+            else:
+                print("\nNo Anchor (Program data:) events detected.")
+            print("==================================================")
+
+    elif args.command == "stress-test":
+        sim_val = None
+        try:
+            with open(args.target, "r") as f:
+                c = f.read().strip()
+                try:
+                    sim_val = json.loads(c)
+                except json.JSONDecodeError:
+                    sim_val = {"logs": c.splitlines(), "unitsConsumed": 0, "err": None}
+        except Exception:
+            pass
+
+        sim = SolanaSimulator(rpc_url=args.rpc)
+        res = sim.parse_raw_simulation(sim_val) if sim_val else sim.simulate_encoded_transaction(args.target)
+        stress_rep = stress_test_simulation(res, configured_cu_limit=args.cu_limit, observed_slippage_bps=args.slippage)
+
+        if args.json:
+            print(stress_rep.to_json(indent=2))
+        else:
+            print("==================================================")
+            print(" TRANSACTION EXECUTION RESILIENCE & STRESS TEST")
+            print("==================================================")
+            print(f"Robustness Score:    {stress_rep.robustness_score}/100 [{stress_rep.risk_tier}]")
+            cu = stress_rep.cu_sensitivity
+            if cu:
+                print(f"Compute Units:       {cu.simulated_cus:,} consumed / {cu.configured_limit:,} limit (+{cu.buffer_percentage:.1f}% margin)")
+                print(f"CU Evaluation:       {cu.evaluation}")
+                print(f"CU Advisory:         {cu.recommendation}")
+
+            print("\nSlippage Sensitivity Matrix:")
+            print(f"  {'Tolerance':<10} | {'Status':<18} | {'Revert Prob':<12} | Note")
+            print("  " + "-" * 65)
+            for sm in stress_rep.slippage_matrix:
+                print(f"  {sm.tested_slippage_bps:<3} bps     | {sm.status:<18} | {sm.revert_probability_pct:.1f}%        | {sm.explanation}")
+
+            print("\nPriority Fee Volatility Impact:")
+            for sc in stress_rep.fee_volatility_scenarios:
+                print(f"  {sc.surge_tier:<35} | {sc.implied_fee_sol:.6f} SOL | Drop Risk: {sc.drop_risk_pct:.1f}%")
+
+            if stress_rep.critical_vulnerabilities:
+                print("\nCritical Vulnerabilities:")
+                for v in stress_rep.critical_vulnerabilities:
+                    print(f"  [!] {v}")
+
+            print("\nRecommendations:")
+            for r in stress_rep.actionable_recommendations:
+                print(f"  - {r}")
+            print("==================================================")
+
+    elif args.command == "shadow-diff":
+        with open(args.target, "r") as f:
+            data = json.load(f)
+
+        pre_accs = data.get("preAccounts", data.get("pre_accounts", []))
+        post_accs = data.get("postAccounts", data.get("accounts", data.get("post_accounts", [])))
+        keys = data.get("accountKeys", data.get("account_keys"))
+
+        summary = create_account_snapshot_delta(pre_accs, post_accs, account_keys=keys)
+        if args.json:
+            print(summary.to_json(indent=2))
+        else:
+            print("==================================================")
+            print(" ACCOUNT SHADOW SNAPSHOT & RENT EXEMPTION AUDIT")
+            print("==================================================")
+            print(f"Accounts Touched:    {summary.total_accounts_touched}")
+            print(f"Accounts Created:    {summary.accounts_created}")
+            print(f"Accounts Closed:     {summary.accounts_closed}")
+            print(f"Net SOL Delta:       {summary.total_sol_delta:+.6f} SOL ({summary.total_lamports_delta:+,} lamports)")
+            print(f"Net Data Delta:      {summary.total_bytes_delta:+,} bytes")
+
+            if summary.rent_exempt_violations:
+                print("\nRent-Exempt Violations:")
+                for vi in summary.rent_exempt_violations:
+                    print(f"  [X] {vi}")
+            else:
+                print("\nRent-Exempt Check:   ALL ACCOUNTS COMPLIANT")
+
+            print("\nAccount Deltas:")
+            for d in summary.account_deltas:
+                status = f"Δ {d.sol_delta:+.6f} SOL, Δ {d.data_len_delta:+} B"
+                if d.owner_changed:
+                    status += f" (Owner -> {d.post_owner[:8]}...)"
+                print(f"  {d.pubkey[:16]}...: {status}")
             print("==================================================")
 
     elif args.command == "simulate":

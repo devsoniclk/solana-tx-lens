@@ -85,6 +85,9 @@ class SimulationResult:
     contention: Optional[Any] = None
     mev_radar: Optional[Any] = None
     route: Optional[Any] = None
+    events_report: Optional[Any] = None
+    shadow_snapshot: Optional[Any] = None
+    stress_test: Optional[Any] = None
     raw_logs: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:

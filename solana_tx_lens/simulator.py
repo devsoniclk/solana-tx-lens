@@ -7,11 +7,14 @@ from .contention import audit_account_contention
 from .cpi_parser import parse_cpi_tree
 from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
 from .error_decoder import decode_solana_error
+from .events import decode_program_events_and_returns
 from .guard import assess_simulation_health
 from .mev_radar import scan_mev_vulnerabilities
 from .models import SimulationResult
 from .optimizer import optimize_compute_budget
 from .route_analyzer import analyze_swap_route
+from .snapshot import create_account_snapshot_delta
+from .stress_tester import stress_test_simulation
 
 
 class SolanaSimulator:
@@ -133,4 +136,11 @@ class SolanaSimulator:
         result.health = assess_simulation_health(result)
         result.mev_radar = scan_mev_vulnerabilities(result)
         result.route = analyze_swap_route(result)
+        result.events_report = decode_program_events_and_returns(logs)
+        result.shadow_snapshot = create_account_snapshot_delta(
+            pre_accounts or [],
+            post_accounts,
+            account_keys=[k.get("pubkey") if isinstance(k, dict) else str(k) for k in (keys or [])] if keys else None,
+        )
+        result.stress_test = stress_test_simulation(result)
         return result

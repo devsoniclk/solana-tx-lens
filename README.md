@@ -5,7 +5,7 @@
 [![CI](https://github.com/devsoniclk/solana-tx-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/devsoniclk/solana-tx-lens/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/solana-tx-lens/)
-[![Version](https://img.shields.io/badge/version-0.5.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
+[![Version](https://img.shields.io/badge/version-0.6.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
 
 ---
 
@@ -21,7 +21,10 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 
 ## 3. What `solana-tx-lens` Does Differently
 `solana-tx-lens` provides a **lightweight, headless simulation & diagnostic engine** with zero validator overhead:
-- **Model Context Protocol (MCP) Server**: Provides standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Model Context Protocol (MCP) Server**: Provides 13 standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`, `solana_decode_events`, `solana_stress_test`, `solana_shadow_diff`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Program Return Data & Anchor Event Log Decoder**: Extracts `Program return: <program_id> <base64>` and `Program data: <base64>` logs, resolves 8-byte Anchor discriminators across Raydium, Orca Whirlpool, Pump.fun, Phoenix DEX, and Kamino, and parses typed return primitives (strings, u64/u128 ints, pubkeys).
+- **Execution Resilience & Slippage Stress-Tester**: Evaluates transaction resilience across 7 slippage tiers (5 to 500 bps), CU limit margins, and priority fee volatility surges (1x to 25x), calculating a composite Robustness Score (0–100) and pinpointing revert cliff points.
+- **Account Snapshot Delta & Shadow State Replayer**: Computes granular byte-level account modifications, tracks rent-exempt minimum reserves (890k lamports + 6,960 lamports/byte), and maintains an in-memory shadow slot cache for sequential multi-tx pipeline execution without extra RPC latency.
 - **Pre-flight MEV Vulnerability Radar & Sandwich Protection**: Evaluates simulated DEX interactions for two-sided sandwich exposure, excessive slippage tolerance (>0.50%), public mempool vulnerability, and frontrunning risks with automated remediation instructions.
 - **Multi-DEX Swap Route & Flow Graph Analyzer**: Reconstructs complete multi-hop swap sequences across Raydium, Orca Whirlpools, Pump.fun, Meteora DLMM, and Lifinity, rendering ASCII pipeline graphs, Mermaid flowcharts, effective exchange rates, and cyclic arbitrage detection.
 - **Dynamic Priority Fee & Jito Tip Guide**: Generates dynamic Compute Unit limits, 6-tier prioritization fees (Min, Low, Medium, High, Ultra, Extreme), and 4-tier Jito leader tips (Standard, High Priority, Urgent Arbitrage, Sniper) with turnkey Web3 SDK snippets.

@@ -341,3 +341,82 @@ def test_cli_fee_guide_subcommand():
     data = json.loads(res_json.stdout)
     assert data["tx_type"] == "dex_swap"
     assert len(data["priority_fee_tiers"]) == 6
+
+
+def test_cli_decode_events_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    tf = tmp_path / "events.json"
+    tf.write_text(
+        json.dumps(
+            {
+                "logs": [
+                    "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 invoke [1]",
+                    "Program return: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 VGVzdA==",
+                    "Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 success",
+                ]
+            }
+        )
+    )
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "decode-events", str(tf)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "PROGRAM RETURN DATA & ANCHOR EVENT LOGS" in res.stdout
+    assert "Test" in res.stdout
+
+    res_json = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "decode-events", str(tf), "--json"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res_json.returncode == 0
+    data = json.loads(res_json.stdout)
+    assert data["has_return_data"] is True
+
+
+def test_cli_stress_test_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    tf = tmp_path / "sim.json"
+    tf.write_text(json.dumps({"unitsConsumed": 85000, "logs": []}))
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "stress-test", str(tf), "--cu-limit", "100000", "--slippage", "50"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "TRANSACTION EXECUTION RESILIENCE & STRESS TEST" in res.stdout
+    assert "Robustness Score" in res.stdout
+
+
+def test_cli_shadow_diff_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    tf = tmp_path / "accounts.json"
+    tf.write_text(
+        json.dumps(
+            {
+                "preAccounts": [{"pubkey": "Pk1", "lamports": 5000}],
+                "postAccounts": [{"pubkey": "Pk1", "lamports": 12000}],
+            }
+        )
+    )
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "shadow-diff", str(tf)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "ACCOUNT SHADOW SNAPSHOT & RENT EXEMPTION AUDIT" in res.stdout
+    assert "Accounts Touched:    1" in res.stdout
