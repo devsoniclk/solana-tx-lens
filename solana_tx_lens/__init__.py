@@ -114,8 +114,9 @@ from .zero_copy import (
     audit_zero_copy_layout,
     benchmark_zero_copy_cu,
 )
+from .witness_bridge import attest_simulation_result
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 __all__ = [
     "SolanaSimulator",
     "BundleSimulator",
@@ -215,4 +216,5 @@ __all__ = [
     "CompressionTreeAuditReport",
     "audit_compression_tree",
     "calculate_tree_account_size",
+    "attest_simulation_result",
 ]

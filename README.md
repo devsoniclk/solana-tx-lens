@@ -5,7 +5,7 @@
 [![CI](https://github.com/devsoniclk/solana-tx-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/devsoniclk/solana-tx-lens/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/solana-tx-lens/)
-[![Version](https://img.shields.io/badge/version-0.8.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
+[![Version](https://img.shields.io/badge/version-0.9.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
 
 ---
 
@@ -22,6 +22,7 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 ## 3. What `solana-tx-lens` Does Differently
 `solana-tx-lens` provides a **lightweight, headless simulation & diagnostic engine** with zero validator overhead:
 - **Model Context Protocol (MCP) Server**: Provides 22 standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`, `solana_decode_events`, `solana_stress_test`, `solana_shadow_diff`, `solana_inspect_token_extensions`, `solana_analyze_access_list`, `solana_verify_policy`, `solana_audit_zero_copy`, `solana_benchmark_zero_copy`, `solana_decode_idl`, `solana_generate_flamegraph`, `solana_export_flamegraph_svg`, `solana_audit_compression`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **`agent-witness` Cryptographic Attestation Integration (`solana_tx_lens.witness_bridge`)**: Export simulation results, CU burn profiles, and CPI invocation trees directly into signed RFC 6962 Merkle deliberation steps and zkVM receipts for verifiable on-chain/cross-chain attestation.
 - **Zero-Copy Account Layout & Memory Alignment Auditor**: Audits Solana account structures against Anchor `zero_copy`, `bytemuck::Pod`, `bytemuck::Zeroable`, and C-representation (`#[repr(C)]`) memory alignment constraints. Computes field byte offsets, internal padding holes, 8-byte alignment compliance for Solana eBPF/rBPF runtimes, detects unaligned memory traps, and benchmarks Compute Unit savings (~120 CUs flat vs. 5,000–50,000 CUs for heap Borsh deserialization).
 - **Anchor Dynamic IDL Registry & Instruction Reconstructor**: Dynamically registers Anchor IDL specifications, calculates 8-byte instruction/account/event discriminators via SHA-256 hashes (`global:<name>`, `account:<name>`, `event:<name>`), reconstructs typed instruction arguments, associates transaction account keys with named IDL metamaps (`is_signer`, `writable`), and decodes custom program error codes.
 - **Hierarchical CU Execution Flamegraph & Bottleneck Profiler**: Parses simulation log traces across arbitrary CPI depths, calculates inclusive vs. exclusive Compute Unit consumption per invocation node, identifies the exact instruction hotspots burning execution budgets, and generates standalone responsive dark-mode SVG flamegraphs and formatted ASCII progress trees.
