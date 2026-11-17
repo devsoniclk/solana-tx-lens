@@ -420,3 +420,97 @@ def test_cli_shadow_diff_subcommand(tmp_path):
     assert res.returncode == 0
     assert "ACCOUNT SHADOW SNAPSHOT & RENT EXEMPTION AUDIT" in res.stdout
     assert "Accounts Touched:    1" in res.stdout
+
+
+def test_cli_token_extensions_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    tf = tmp_path / "mint_ext.json"
+    tf.write_text(
+        json.dumps(
+            {
+                "mint": "Token2022Mint11111111111111111111111111111",
+                "extensions": [
+                    {"type": "TransferFeeConfig", "fee_basis_points": 150, "maximum_fee": 10000000}
+                ],
+            }
+        )
+    )
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "token-extensions", str(tf), "--amount", "100.0"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "TOKEN-2022 EXTENSIONS & TRANSFER HOOK AUDIT" in res.stdout
+    assert "Transfer Fee Config:" in res.stdout
+    assert "150 bps" in res.stdout
+
+    # Test JSON mode
+    res_json = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "token-extensions", str(tf), "--amount", "100.0", "--json"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res_json.returncode == 0
+    data = json.loads(res_json.stdout)
+    assert data["is_token_2022"] is True
+    assert data["fee_deducted"] == 1.5
+
+
+def test_cli_access_list_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    tf = tmp_path / "access.json"
+    tf.write_text(
+        json.dumps(
+            {
+                "account_keys": [
+                    "Signer1111111111111111111111111111111111111",
+                    "Writable11111111111111111111111111111111111",
+                ],
+                "writable_indices": [0, 1],
+                "signer_indices": [0],
+            }
+        )
+    )
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "access-list", str(tf)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "SEALEVEL STATE ACCESS LIST & CONCURRENCY AUDIT" in res.stdout
+    assert "Total Accounts:      2" in res.stdout
+    assert "Concurrency Score:   100/100" in res.stdout
+
+
+def test_cli_verify_policy_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    sim_file = tmp_path / "sim.json"
+    sim_file.write_text(json.dumps({"unitsConsumed": 45000, "logs": []}))
+    rules_file = tmp_path / "rules.json"
+    rules_file.write_text(
+        json.dumps(
+            [
+                {"rule_id": "r_cu", "rule_type": "max_compute_units", "params": {"limit": 100000}}
+            ]
+        )
+    )
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "verify-policy", str(sim_file), "--rules", str(rules_file)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "PRE-FLIGHT SAFETY POLICY & INVARIANT AUDIT" in res.stdout
+    assert "Policy Status:       PASSED" in res.stdout

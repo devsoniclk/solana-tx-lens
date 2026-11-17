@@ -6,6 +6,14 @@ pre-flight MEV safety guard, dynamic compute budget optimizer, atomic Jito bundl
 and Model Context Protocol (MCP) server for Solana.
 """
 
+from .access_list import (
+    AccessListOptimizationReport,
+    AccountLockRole,
+    LUTRecommendation,
+    SerializationStats,
+    analyze_access_list,
+    estimate_tx_serialized_size,
+)
 from .bundle import (
     JITO_TIP_ACCOUNTS,
     BundleSimulationResult,
@@ -40,6 +48,12 @@ from .models import (
     TokenBalanceDiff,
 )
 from .optimizer import ComputeBudgetOptimization, optimize_compute_budget
+from .policy import (
+    PolicyRule,
+    PolicyVerificationReport,
+    PolicyViolation,
+    verify_simulation_policy,
+)
 from .route_analyzer import SwapHop, SwapRouteReport, analyze_swap_route, render_route_ascii, render_route_mermaid
 from .simulator import SolanaSimulator
 from .snapshot import (
@@ -56,6 +70,14 @@ from .stress_tester import (
     SlippageStressTester,
     stress_test_simulation,
 )
+from .token_extensions import (
+    ExtensionDetail,
+    TokenExtensionAuditReport,
+    TransferFeeConfig,
+    TransferHookConfig,
+    calculate_transfer_fee,
+    inspect_token_extensions,
+)
 from .visualizer import (
     render_cpi_mermaid_flowchart,
     render_cpi_mermaid_sequence,
@@ -63,7 +85,7 @@ from .visualizer import (
     render_simulation_report,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     "SolanaSimulator",
     "BundleSimulator",
@@ -125,4 +147,20 @@ __all__ = [
     "SolanaFeeGuide",
     "PriorityFeeTier",
     "JitoTipTier",
+    "analyze_access_list",
+    "estimate_tx_serialized_size",
+    "AccessListOptimizationReport",
+    "AccountLockRole",
+    "LUTRecommendation",
+    "SerializationStats",
+    "inspect_token_extensions",
+    "calculate_transfer_fee",
+    "TokenExtensionAuditReport",
+    "TransferFeeConfig",
+    "TransferHookConfig",
+    "ExtensionDetail",
+    "verify_simulation_policy",
+    "PolicyRule",
+    "PolicyViolation",
+    "PolicyVerificationReport",
 ]

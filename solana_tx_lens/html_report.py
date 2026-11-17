@@ -240,6 +240,61 @@ def render_html_report(
         </div>
         """
 
+    # Token-2022 Extensions Section
+    t22 = getattr(result, "token_extensions", None)
+    t22_html = ""
+    if t22:
+        ext_items = "".join(f"<li><strong>[{html.escape(e.risk_level)}] {html.escape(e.extension_type)}:</strong> {html.escape(e.description)}</li>" for e in getattr(t22, "detected_extensions", []))
+        t22_badge_cls = "badge-green" if t22.risk_rating == "LOW" else ("badge-yellow" if t22.risk_rating == "MEDIUM" else "badge-red")
+        t22_html = f"""
+        <div class="card">
+            <h3>🔬 Token-2022 Extensions & Transfer Hook Audit</h3>
+            <div class="grid-stats">
+                <div class="stat"><span class="label">Mint</span><span class="val highlight">{html.escape(t22.mint[:8])}...</span></div>
+                <div class="stat"><span class="label">Token-2022</span><span class="val">{'YES' if t22.is_token_2022 else 'NO'}</span></div>
+                <div class="stat"><span class="label">Risk Rating</span><span class="val {t22_badge_cls}">{t22.risk_rating} ({t22.risk_score}/100)</span></div>
+                <div class="stat"><span class="label">Fee Deducted</span><span class="val">{t22.fee_deducted:,.4f}</span></div>
+            </div>
+            {"<ul class='warn-list' style='margin-top: 12px;'>" + ext_items + "</ul>" if ext_items else "<p class='dim'>No extensions active.</p>"}
+        </div>
+        """
+
+    # Access List & Concurrency Section
+    al = getattr(result, "access_list_report", None)
+    al_html = ""
+    if al:
+        al_badge_cls = "badge-green" if al.concurrency_score >= 80 else ("badge-yellow" if al.concurrency_score >= 50 else "badge-red")
+        al_html = f"""
+        <div class="card">
+            <h3>⚡ State Access List & Sealevel Parallelism</h3>
+            <div class="grid-stats">
+                <div class="stat"><span class="label">Concurrency Score</span><span class="val {al_badge_cls}">{al.concurrency_score}/100</span></div>
+                <div class="stat"><span class="label">Write Locks</span><span class="val neg">{len(al.write_locks)}</span></div>
+                <div class="stat"><span class="label">Read Locks</span><span class="val pos">{len(al.read_locks)}</span></div>
+                <div class="stat"><span class="label">MTU Utilization</span><span class="val highlight">{al.serialization.utilization_pct if al.serialization else 0}%</span></div>
+            </div>
+        </div>
+        """
+
+    # Policy Verification Section
+    pv = getattr(result, "policy_report", None)
+    pv_html = ""
+    if pv:
+        pv_badge_cls = "badge-green" if pv.passed else "badge-red"
+        v_items = "".join(f"<li><strong>[{html.escape(v.severity)}] {html.escape(v.rule_id)}:</strong> {html.escape(v.message)}</li>" for v in getattr(pv, "violations", []))
+        pv_html = f"""
+        <div class="card">
+            <h3>📋 Pre-Flight Safety Policy Verification</h3>
+            <div class="grid-stats">
+                <div class="stat"><span class="label">Policy Verdict</span><span class="val {pv_badge_cls}">{'PASSED' if pv.passed else 'FAILED'}</span></div>
+                <div class="stat"><span class="label">Rules Evaluated</span><span class="val">{pv.total_rules_evaluated}</span></div>
+                <div class="stat"><span class="label">Violations</span><span class="val {'neg' if pv.violations_count > 0 else 'pos'}">{pv.violations_count}</span></div>
+            </div>
+            <p class="summary-text">{html.escape(pv.summary)}</p>
+            {"<ul class='warn-list' style='margin-top: 12px; color: var(--red);'>" + v_items + "</ul>" if v_items else ""}
+        </div>
+        """
+
     raw_logs_html = html.escape("\n".join(result.raw_logs)) or "No logs available."
     mermaid_seq = html.escape(result.to_mermaid(diagram_type="sequence"))
     mermaid_flow = html.escape(result.to_mermaid(diagram_type="flowchart"))
@@ -338,6 +393,12 @@ pre {{ background: #0d1117; border: 1px solid var(--border); padding: 12px; bord
 {radar_html}
 
 {route_html}
+
+{t22_html}
+
+{al_html}
+
+{pv_html}
 
 <div class="card">
     <h3>🛡️ Pre-Flight Safety & MEV Guard</h3>

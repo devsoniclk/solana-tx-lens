@@ -18,7 +18,7 @@ def test_mcp_initialize():
     assert resp["id"] == 1
     assert resp["result"]["protocolVersion"] == "2024-11-05"
     assert resp["result"]["serverInfo"]["name"] == "solana-tx-lens-mcp"
-    assert resp["result"]["serverInfo"]["version"] == "0.6.0"
+    assert resp["result"]["serverInfo"]["version"] == "0.7.0"
 
 
 def test_mcp_tools_list():
@@ -304,6 +304,75 @@ def test_mcp_call_shadow_diff():
     content = json.loads(resp["result"]["content"][0]["text"])
     assert content["total_accounts_touched"] == 1
     assert content["total_lamports_delta"] == 4000
+
+
+def test_mcp_call_inspect_token_extensions():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_inspect_token_extensions",
+            "arguments": {
+                "mint": "Token2022Mint11111111111111111111111111111",
+                "account_data_extensions": [
+                    {"type": "TransferFeeConfig", "fee_basis_points": 100, "maximum_fee": 10000000}
+                ],
+                "transfer_amount": 50.0,
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["is_token_2022"] is True
+    assert content["fee_deducted"] == 0.5
+
+
+def test_mcp_call_analyze_access_list():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_analyze_access_list",
+            "arguments": {
+                "account_keys": [
+                    "Signer1111111111111111111111111111111111111",
+                    "Writable11111111111111111111111111111111111",
+                ],
+                "writable_indices": [0, 1],
+                "signer_indices": [0],
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["total_accounts"] == 2
+    assert content["concurrency_score"] == 100
+
+
+def test_mcp_call_verify_policy():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_verify_policy",
+            "arguments": {
+                "target": json.dumps({"unitsConsumed": 50000, "logs": []}),
+                "rules": [
+                    {"rule_id": "r1", "rule_type": "max_compute_units", "params": {"limit": 100000}}
+                ],
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["passed"] is True
+    assert content["total_rules_evaluated"] == 1
 
 
 def test_mcp_unknown_tool():

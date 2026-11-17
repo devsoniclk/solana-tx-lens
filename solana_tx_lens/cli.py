@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from .access_list import analyze_access_list
 from .bundle import BundleSimulator
 from .contention import audit_account_contention
 from .error_decoder import decode_solana_error
@@ -12,10 +13,12 @@ from .html_report import render_bundle_html_report, render_html_report
 from .mcp_server import SolanaLensMCPServer
 from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
+from .policy import verify_simulation_policy
 from .route_analyzer import analyze_swap_route
 from .simulator import SolanaSimulator
 from .snapshot import create_account_snapshot_delta
 from .stress_tester import stress_test_simulation
+from .token_extensions import inspect_token_extensions
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence, render_simulation_report
 
 
@@ -200,6 +203,35 @@ def main() -> None:
     )
     p_sd.add_argument("target", help="Simulation JSON file containing accounts.")
     p_sd.add_argument("--json", action="store_true", help="Output account snapshot deltas as JSON.")
+
+    # token-extensions command
+    p_te = subparsers.add_parser(
+        "token-extensions",
+        help="Audit Token-2022 extensions, transfer fees, transfer hooks, and permanent delegates.",
+    )
+    p_te.add_argument("target", help="Token mint pubkey or JSON file containing mint extensions.")
+    p_te.add_argument("--program", default="TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", help="Token program ID.")
+    p_te.add_argument("--amount", type=float, default=0.0, help="Simulated transfer amount.")
+    p_te.add_argument("--decimals", type=int, default=6, help="Token decimals (default: 6).")
+    p_te.add_argument("--json", action="store_true", help="Output audit report as JSON.")
+
+    # access-list command
+    p_al = subparsers.add_parser(
+        "access-list",
+        help="Analyze transaction account read/write locks, Sealevel concurrency, and ALT compression.",
+    )
+    p_al.add_argument("target", help="JSON file containing account keys and lock configuration.")
+    p_al.add_argument("--json", action="store_true", help="Output access list report as JSON.")
+
+    # verify-policy command
+    p_vp = subparsers.add_parser(
+        "verify-policy",
+        help="Verify declarative safety policy rules against transaction simulation.",
+    )
+    p_vp.add_argument("target", help="Base64 transaction or simulation JSON file.")
+    p_vp.add_argument("--rules", required=True, help="Path to rules JSON file or inline JSON string.")
+    p_vp.add_argument("--rpc", default="https://api.mainnet-beta.solana.com", help="Solana RPC endpoint.")
+    p_vp.add_argument("--json", action="store_true", help="Output policy report as JSON.")
 
     args = parser.parse_args()
 
@@ -583,6 +615,159 @@ def main() -> None:
                 if d.owner_changed:
                     status += f" (Owner -> {d.post_owner[:8]}...)"
                 print(f"  {d.pubkey[:16]}...: {status}")
+            print("==================================================")
+
+    elif args.command == "token-extensions":
+        mint = args.target
+        ext_data = []
+        logs = []
+        try:
+            with open(args.target, "r") as f:
+                d = json.load(f)
+                mint = d.get("mint", args.target)
+                ext_data = d.get("extensions", d.get("account_data_extensions", []))
+                logs = d.get("logs", [])
+        except Exception:
+            pass
+
+        t22_rep = inspect_token_extensions(
+            mint=mint,
+            program_id=args.program,
+            account_data_extensions=ext_data,
+            simulation_logs=logs,
+            transfer_amount=args.amount,
+            decimals=args.decimals,
+        )
+        if args.json:
+            print(json.dumps(t22_rep.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" TOKEN-2022 EXTENSIONS & TRANSFER HOOK AUDIT")
+            print("==================================================")
+            print(f"Mint:             {t22_rep.mint}")
+            print(f"Is Token-2022:    {'Yes' if t22_rep.is_token_2022 else 'No'}")
+            print(f"Risk Rating:      {t22_rep.risk_rating} ({t22_rep.risk_score}/100)")
+            if t22_rep.transfer_fee:
+                tf = t22_rep.transfer_fee
+                print(f"\nTransfer Fee Config:")
+                print(f"  Basis Points:   {tf.fee_basis_points} bps ({tf.fee_basis_points/100:.2f}%)")
+                print(f"  Max Fee Cap:    {tf.maximum_fee:,} raw units")
+                if t22_rep.gross_transfer_amount > 0:
+                    print(f"  Transfer Gross: {t22_rep.gross_transfer_amount:,.4f}")
+                    print(f"  Fee Deducted:   {t22_rep.fee_deducted:,.4f}")
+                    print(f"  Net Received:   {t22_rep.net_transfer_amount:,.4f}")
+
+            if t22_rep.transfer_hook:
+                th = t22_rep.transfer_hook
+                print(f"\nTransfer Hook:")
+                print(f"  Hook Program:   {th.hook_program_id}")
+                print(f"  Invoked:        {'Yes' if th.invoked else 'No'}")
+                print(f"  Status:         {'SUCCESS' if th.success else 'FAILED'}")
+
+            if t22_rep.detected_extensions:
+                print(f"\nDetected Extensions ({len(t22_rep.detected_extensions)}):")
+                for ext in t22_rep.detected_extensions:
+                    print(f"  [{ext.risk_level}] {ext.extension_type}: {ext.description}")
+                    if ext.warning:
+                        print(f"       Warning: {ext.warning}")
+
+            print("\nRecommendations:")
+            for rec in t22_rep.recommendations:
+                print(f"  - {rec}")
+            print("==================================================")
+
+    elif args.command == "access-list":
+        try:
+            with open(args.target, "r") as f:
+                d = json.load(f)
+        except Exception:
+            d = {"account_keys": [args.target]}
+
+        keys = d.get("account_keys", d.get("accountKeys", []))
+        w_idxs = d.get("writable_indices", d.get("writableIndices"))
+        s_idxs = d.get("signer_indices", d.get("signerIndices"))
+
+        al_rep = analyze_access_list(keys, writable_indices=w_idxs, signer_indices=s_idxs)
+        if args.json:
+            print(json.dumps(al_rep.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" SEALEVEL STATE ACCESS LIST & CONCURRENCY AUDIT")
+            print("==================================================")
+            print(f"Total Accounts:      {al_rep.total_accounts}")
+            print(f"Write Locks:         {len(al_rep.write_locks)}")
+            print(f"Read Locks:          {len(al_rep.read_locks)}")
+            print(f"Signers:             {len(al_rep.signers)}")
+            print(f"Concurrency Score:   {al_rep.concurrency_score}/100")
+
+            if al_rep.serialization:
+                s = al_rep.serialization
+                print(f"\nSerialization Stats:")
+                print(f"  Estimated Size:    {s.estimated_serialized_bytes} / {s.mtu_limit_bytes} bytes ({s.utilization_pct}%)")
+                print(f"  Within MTU Limit:  {'Yes' if s.within_mtu_limit else 'NO - EXCEEDS MTU'}")
+
+            if al_rep.lut_recommendation:
+                lut = al_rep.lut_recommendation
+                print(f"\nAddress Lookup Table (ALT) Compression:")
+                print(f"  Compressible Keys: {len(lut.candidate_pubkeys)}")
+                print(f"  Estimated Savings: {lut.bytes_saved} bytes saved (ratio: {lut.compression_ratio:.1%})")
+
+            if al_rep.lock_anti_patterns:
+                print("\nLock Contention Anti-Patterns:")
+                for ap in al_rep.lock_anti_patterns:
+                    print(f"  [!] {ap}")
+
+            print("\nActionable Improvements:")
+            for imp in al_rep.actionable_improvements:
+                print(f"  - {imp}")
+            print("==================================================")
+
+    elif args.command == "verify-policy":
+        sim_val = None
+        try:
+            with open(args.target, "r") as f:
+                content = f.read().strip()
+                try:
+                    sim_val = json.loads(content)
+                except json.JSONDecodeError:
+                    sim_val = {"logs": content.splitlines(), "unitsConsumed": 0, "err": None}
+        except (FileNotFoundError, OSError):
+            pass
+
+        sim = SolanaSimulator(rpc_url=args.rpc)
+        if sim_val:
+            res = sim.parse_raw_simulation(sim_val)
+        else:
+            res = sim.simulate_encoded_transaction(args.target)
+
+        # Parse rules
+        try:
+            with open(args.rules, "r") as f:
+                rules_data = json.load(f)
+        except Exception:
+            rules_data = json.loads(args.rules)
+
+        pol_rep = verify_simulation_policy(res, rules=rules_data)
+        if args.json:
+            print(json.dumps(pol_rep.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" PRE-FLIGHT SAFETY POLICY & INVARIANT AUDIT")
+            print("==================================================")
+            print(f"Policy Status:       {'PASSED' if pol_rep.passed else 'FAILED'}")
+            print(f"Rules Evaluated:     {pol_rep.total_rules_evaluated}")
+            print(f"Violations Detected: {pol_rep.violations_count}")
+            print(f"Summary:             {pol_rep.summary}")
+
+            if pol_rep.violations:
+                print("\nViolations List:")
+                for v in pol_rep.violations:
+                    print(f"  [{v.severity}] {v.rule_id} ({v.rule_type}):")
+                    print(f"       Message:  {v.message}")
+                    if v.actual_value is not None:
+                        print(f"       Actual:   {v.actual_value}")
+                    if v.expected_value is not None:
+                        print(f"       Expected: {v.expected_value}")
             print("==================================================")
 
     elif args.command == "simulate":

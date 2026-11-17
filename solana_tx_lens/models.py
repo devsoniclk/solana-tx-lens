@@ -88,6 +88,9 @@ class SimulationResult:
     events_report: Optional[Any] = None
     shadow_snapshot: Optional[Any] = None
     stress_test: Optional[Any] = None
+    token_extensions: Optional[Any] = None
+    access_list_report: Optional[Any] = None
+    policy_report: Optional[Any] = None
     raw_logs: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:

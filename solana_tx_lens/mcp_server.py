@@ -5,6 +5,7 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
+from .access_list import analyze_access_list
 from .bundle import BundleSimulator
 from .contention import audit_account_contention
 from .cpi_parser import parse_cpi_tree
@@ -15,10 +16,12 @@ from .guard import assess_simulation_health
 from .html_report import render_bundle_html_report, render_html_report
 from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
+from .policy import verify_simulation_policy
 from .route_analyzer import analyze_swap_route
 from .simulator import SolanaSimulator
 from .snapshot import create_account_snapshot_delta
 from .stress_tester import stress_test_simulation
+from .token_extensions import inspect_token_extensions
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence
 
 
@@ -283,6 +286,89 @@ class SolanaLensMCPServer:
                     "required": ["post_accounts"],
                 },
             },
+            {
+                "name": "solana_inspect_token_extensions",
+                "description": "Deeply inspect Solana Token-2022 extensions: compute transfer fees, detect transfer hooks and permanent delegates, and evaluate soulbound/frozen restrictions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "mint": {
+                            "type": "string",
+                            "description": "Token mint public key.",
+                        },
+                        "program_id": {
+                            "type": "string",
+                            "description": "Token program ID (default: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb).",
+                            "default": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                        },
+                        "account_data_extensions": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": "Parsed extension structures from mint account data.",
+                        },
+                        "simulation_logs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional simulation logs to detect runtime transfer hook execution.",
+                        },
+                        "transfer_amount": {
+                            "type": "number",
+                            "description": "Optional transfer amount to calculate exact net receipt and deducted fee.",
+                            "default": 0.0,
+                        },
+                        "decimals": {
+                            "type": "integer",
+                            "description": "Token decimals (default: 6).",
+                            "default": 6,
+                        },
+                    },
+                    "required": ["mint"],
+                },
+            },
+            {
+                "name": "solana_analyze_access_list",
+                "description": "Analyze Solana transaction account access lists: partition read/write locks, detect validator concurrency anti-patterns, evaluate serialization byte budget against MTU, and suggest Address Lookup Table (ALT) compression.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "account_keys": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of account public keys in the transaction message.",
+                        },
+                        "writable_indices": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Indices of accounts marked writable.",
+                        },
+                        "signer_indices": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Indices of accounts that are signers.",
+                        },
+                    },
+                    "required": ["account_keys"],
+                },
+            },
+            {
+                "name": "solana_verify_policy",
+                "description": "Verify declarative pre-execution safety policy rules against a simulated transaction (enforce max SOL loss, min received tokens, forbidden programs, required signers, and compute bounds).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "target": {
+                            "type": "string",
+                            "description": "Base64 transaction or serialized JSON simulation result.",
+                        },
+                        "rules": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": "Array of policy rule definitions ({rule_id, rule_type, severity, params}).",
+                        },
+                    },
+                    "required": ["target", "rules"],
+                },
+            },
         ]
 
     def handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -461,6 +547,52 @@ class SolanaLensMCPServer:
                 shadow_rep = create_account_snapshot_delta(pre_accs, post_accs, account_keys=acc_keys)
                 return shadow_rep.to_dict()
 
+            elif name == "solana_inspect_token_extensions":
+                mint = arguments["mint"]
+                prog = arguments.get("program_id", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+                ext_data = arguments.get("account_data_extensions", [])
+                logs = arguments.get("simulation_logs")
+                amt = float(arguments.get("transfer_amount", 0.0))
+                decs = int(arguments.get("decimals", 6))
+                t22_rep = inspect_token_extensions(
+                    mint=mint,
+                    program_id=prog,
+                    account_data_extensions=ext_data,
+                    simulation_logs=logs,
+                    transfer_amount=amt,
+                    decimals=decs,
+                )
+                return t22_rep.to_dict()
+
+            elif name == "solana_analyze_access_list":
+                keys = arguments["account_keys"]
+                w_idxs = arguments.get("writable_indices")
+                s_idxs = arguments.get("signer_indices")
+                acc_rep = analyze_access_list(
+                    account_keys=keys,
+                    writable_indices=w_idxs,
+                    signer_indices=s_idxs,
+                )
+                return acc_rep.to_dict()
+
+            elif name == "solana_verify_policy":
+                target = arguments["target"]
+                rules = arguments["rules"]
+                try:
+                    data = json.loads(target)
+                except Exception:
+                    data = target
+
+                if isinstance(data, dict) and ("unitsConsumed" in data or "logs" in data):
+                    res = self.simulator.parse_raw_simulation(data)
+                elif isinstance(data, str):
+                    res = self.simulator.simulate_encoded_transaction(data)
+                else:
+                    res = self.simulator.parse_raw_simulation(data if isinstance(data, dict) else {"logs": []})
+
+                pol_rep = verify_simulation_policy(res, rules=rules)
+                return pol_rep.to_dict()
+
             else:
                 return {"error": f"Unknown tool: {name}"}
 
@@ -481,7 +613,7 @@ class SolanaLensMCPServer:
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "solana-tx-lens-mcp",
-                        "version": "0.6.0",
+                        "version": "0.7.0",
                     },
                 },
             }

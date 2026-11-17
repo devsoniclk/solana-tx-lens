@@ -5,7 +5,7 @@
 [![CI](https://github.com/devsoniclk/solana-tx-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/devsoniclk/solana-tx-lens/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/solana-tx-lens/)
-[![Version](https://img.shields.io/badge/version-0.6.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
+[![Version](https://img.shields.io/badge/version-0.7.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
 
 ---
 
@@ -21,7 +21,10 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 
 ## 3. What `solana-tx-lens` Does Differently
 `solana-tx-lens` provides a **lightweight, headless simulation & diagnostic engine** with zero validator overhead:
-- **Model Context Protocol (MCP) Server**: Provides 13 standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`, `solana_decode_events`, `solana_stress_test`, `solana_shadow_diff`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Model Context Protocol (MCP) Server**: Provides 16 standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`, `solana_decode_events`, `solana_stress_test`, `solana_shadow_diff`, `solana_inspect_token_extensions`, `solana_analyze_access_list`, `solana_verify_policy`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Token-2022 Extensions & Transfer Hook Auditor**: Audits modern SPL Token-2022 mint configurations, computing exact transfer fee deductions with ceiling rounding and maximum fee caps (`calculate_transfer_fee`), verifying Transfer Hook CPI invocations and execution failures, alerting on permanent delegate backdoors that permit arbitrary token seizure, and detecting soulbound / frozen default account states.
+- **Sealevel Access List & Address Lookup Table (LUT) Optimizer**: Analyzes transaction account read/write lock roles, audits anti-patterns (e.g. read-only executable programs marked as writable), calculates serialized transaction size against the 1,232-byte IPv6 MTU limit, and computes exact compression savings through Address Lookup Tables (ALTs).
+- **Pre-Flight Declarative Safety Policy Guardrails**: Enforces declarative invariant policy rules (`MAX_COMPUTE_UNITS`, `MIN_COMPUTE_MARGIN`, `MAX_SOL_OUTFLOW`, `MIN_TOKEN_INFLOW`, `FORBIDDEN_PROGRAMS`, `DISALLOW_PERMANENT_DELEGATE`) against simulation results, delivering automated pre-broadcast pass/fail verdicts and granular violation reports.
 - **Program Return Data & Anchor Event Log Decoder**: Extracts `Program return: <program_id> <base64>` and `Program data: <base64>` logs, resolves 8-byte Anchor discriminators across Raydium, Orca Whirlpool, Pump.fun, Phoenix DEX, and Kamino, and parses typed return primitives (strings, u64/u128 ints, pubkeys).
 - **Execution Resilience & Slippage Stress-Tester**: Evaluates transaction resilience across 7 slippage tiers (5 to 500 bps), CU limit margins, and priority fee volatility surges (1x to 25x), calculating a composite Robustness Score (0–100) and pinpointing revert cliff points.
 - **Account Snapshot Delta & Shadow State Replayer**: Computes granular byte-level account modifications, tracks rent-exempt minimum reserves (890k lamports + 6,960 lamports/byte), and maintains an in-memory shadow slot cache for sequential multi-tx pipeline execution without extra RPC latency.
@@ -262,7 +265,10 @@ Measured on Apple Silicon (M5 Air):
 - [x] Account write-lock contention & Sealevel parallelism auditor (`audit_account_contention`).
 - [x] Self-contained dark-mode interactive HTML diagnostic dossier (`to_html()`).
 - [x] Atomic Jito / MEV Bundle Simulator & Tip Analyzer (`BundleSimulator`).
-- [x] Model Context Protocol (MCP) Server (`SolanaLensMCPServer`, `sol-lens mcp`).
+- [x] Model Context Protocol (MCP) Server (`SolanaLensMCPServer`, `sol-lens mcp`, 16 tools).
+- [x] Token-2022 Extensions & Transfer Hook Auditor (`inspect_token_extensions`).
+- [x] Sealevel Access List & Address Lookup Table (LUT) Optimizer (`analyze_access_list`).
+- [x] Pre-Flight Declarative Safety Policy Guardrails (`verify_simulation_policy`).
 - [ ] Automatic on-chain Anchor IDL fetcher from program account data.
 
 ---
