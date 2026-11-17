@@ -1,7 +1,7 @@
 """
 agent-witness integration for solana-tx-lens.
 Enables automatic cryptographic Merkle attestation of transaction simulations,
-compute unit profiling, and CPI call graphs.
+compute unit profiling, and CPI call graphs with zero-dependency standalone fallback.
 """
 from __future__ import annotations
 
@@ -17,6 +17,12 @@ try:
     HAS_WITNESS = True
 except ImportError:
     HAS_WITNESS = False
+    class StepType:  # type: ignore
+        TOOL_RESULT = "tool_result"
+        TOOL_CALL = "tool_call"
+        OBSERVATION = "observation"
+        THOUGHT = "thought"
+        DECISION = "decision"
 
 
 def attest_simulation_result(
@@ -27,7 +33,6 @@ def attest_simulation_result(
     """
     Attests a transaction simulation into an agent-witness deliberation step.
     """
-    eng = engine or (WitnessEngine(agent_id=agent_id) if HAS_WITNESS else None)
     step_desc = f"Solana Simulation: success={result.success}, CUs={result.total_compute_units}/{result.max_compute_units}"
     prog_ids = []
     for r in result.cpi_roots:
@@ -46,13 +51,19 @@ def attest_simulation_result(
         "error": result.error.name if result.error else None,
     }
 
+    eng = engine or (WitnessEngine(agent_id=agent_id) if HAS_WITNESS else None)
     if eng:
         step = eng.record_step(StepType.TOOL_RESULT, step_desc, metadata=meta)
         return {
             "attested": True,
-            "step_index": step.index,
+            "step_index": getattr(step, "index", 0),
             "success": result.success,
             "compute_units": result.total_compute_units,
+            "witness_installed": HAS_WITNESS,
         }
     else:
-        return {"attested": False, "reason": "agent-witness not installed"}
+        return {
+            "attested": False,
+            "reason": "agent-witness not installed",
+            "witness_installed": False,
+        }
