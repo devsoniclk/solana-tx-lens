@@ -219,8 +219,6 @@ sol-lens access-list access_list.json
 
 # Verify pre-execution safety policy rules and invariant constraints
 sol-lens verify-policy simulation_dump.json --rules rules.json
-```
-sol-lens route simulation_dump.json --mermaid
 
 # Generate dynamic priority fee tiers and Jito tip guide
 sol-lens fee-guide --cus 180000 --type dex_swap
@@ -328,10 +326,14 @@ Measured on Apple Silicon (M5 Air):
 - [x] Account write-lock contention & Sealevel parallelism auditor (`audit_account_contention`).
 - [x] Self-contained dark-mode interactive HTML diagnostic dossier (`to_html()`).
 - [x] Atomic Jito / MEV Bundle Simulator & Tip Analyzer (`BundleSimulator`).
-- [x] Model Context Protocol (MCP) Server (`SolanaLensMCPServer`, `sol-lens mcp`, 16 tools).
+- [x] Model Context Protocol (MCP) Server (`SolanaLensMCPServer`, `sol-lens mcp`, 22 tools).
 - [x] Token-2022 Extensions & Transfer Hook Auditor (`inspect_token_extensions`).
 - [x] Sealevel Access List & Address Lookup Table (LUT) Optimizer (`analyze_access_list`).
 - [x] Pre-Flight Declarative Safety Policy Guardrails (`verify_simulation_policy`).
+- [x] Zero-Copy Account Memory Layout & Byte Alignment Auditor (`audit_zero_copy_layout`).
+- [x] Dynamic Anchor IDL Instruction & Event Decoder with Discriminator Engine (`AnchorIDLRegistry`).
+- [x] Compute Unit (CU) Execution Flamegraph & Bottleneck Profiler (`build_flamegraph_from_logs`, SVG & ASCII).
+- [x] SPL Concurrent Merkle Tree Compression Auditor & MTU Gate (`audit_compression_tree`).
 - [ ] Automatic on-chain Anchor IDL fetcher from program account data.
 
 ---
