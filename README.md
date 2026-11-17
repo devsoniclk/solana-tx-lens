@@ -5,7 +5,7 @@
 [![CI](https://github.com/devsoniclk/solana-tx-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/devsoniclk/solana-tx-lens/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/solana-tx-lens/)
-[![Version](https://img.shields.io/badge/version-0.7.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
+[![Version](https://img.shields.io/badge/version-0.8.0-green.svg)](https://github.com/devsoniclk/solana-tx-lens/releases)
 
 ---
 
@@ -21,7 +21,11 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 
 ## 3. What `solana-tx-lens` Does Differently
 `solana-tx-lens` provides a **lightweight, headless simulation & diagnostic engine** with zero validator overhead:
-- **Model Context Protocol (MCP) Server**: Provides 16 standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`, `solana_decode_events`, `solana_stress_test`, `solana_shadow_diff`, `solana_inspect_token_extensions`, `solana_analyze_access_list`, `solana_verify_policy`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Model Context Protocol (MCP) Server**: Provides 22 standard JSON-RPC 2.0 stdio tools (`solana_simulate`, `solana_inspect_cpi`, `solana_optimize_cu`, `solana_audit_contention`, `solana_audit_guard`, `solana_simulate_bundle`, `solana_generate_dossier`, `solana_mev_radar`, `solana_analyze_route`, `solana_fee_guide`, `solana_decode_events`, `solana_stress_test`, `solana_shadow_diff`, `solana_inspect_token_extensions`, `solana_analyze_access_list`, `solana_verify_policy`, `solana_audit_zero_copy`, `solana_benchmark_zero_copy`, `solana_decode_idl`, `solana_generate_flamegraph`, `solana_export_flamegraph_svg`, `solana_audit_compression`) for AI agents (OpenBot, Claude Code, Cursor, Cline).
+- **Zero-Copy Account Layout & Memory Alignment Auditor**: Audits Solana account structures against Anchor `zero_copy`, `bytemuck::Pod`, `bytemuck::Zeroable`, and C-representation (`#[repr(C)]`) memory alignment constraints. Computes field byte offsets, internal padding holes, 8-byte alignment compliance for Solana eBPF/rBPF runtimes, detects unaligned memory traps, and benchmarks Compute Unit savings (~120 CUs flat vs. 5,000–50,000 CUs for heap Borsh deserialization).
+- **Anchor Dynamic IDL Registry & Instruction Reconstructor**: Dynamically registers Anchor IDL specifications, calculates 8-byte instruction/account/event discriminators via SHA-256 hashes (`global:<name>`, `account:<name>`, `event:<name>`), reconstructs typed instruction arguments, associates transaction account keys with named IDL metamaps (`is_signer`, `writable`), and decodes custom program error codes.
+- **Hierarchical CU Execution Flamegraph & Bottleneck Profiler**: Parses simulation log traces across arbitrary CPI depths, calculates inclusive vs. exclusive Compute Unit consumption per invocation node, identifies the exact instruction hotspots burning execution budgets, and generates standalone responsive dark-mode SVG flamegraphs and formatted ASCII progress trees.
+- **SPL State Compression & Concurrent Merkle Tree Auditor**: Audits Concurrent Merkle Tree configurations (`max_depth`, `max_buffer_size`, `canopy_depth`), verifies valid SPL depth/buffer pairings, calculates on-chain account byte size and rent-exempt reserves, computes client proof path lengths (`max_depth - canopy_depth`), and enforces strict IPv6 1,232-byte MTU limit safety.
 - **Token-2022 Extensions & Transfer Hook Auditor**: Audits modern SPL Token-2022 mint configurations, computing exact transfer fee deductions with ceiling rounding and maximum fee caps (`calculate_transfer_fee`), verifying Transfer Hook CPI invocations and execution failures, alerting on permanent delegate backdoors that permit arbitrary token seizure, and detecting soulbound / frozen default account states.
 - **Sealevel Access List & Address Lookup Table (LUT) Optimizer**: Analyzes transaction account read/write lock roles, audits anti-patterns (e.g. read-only executable programs marked as writable), calculates serialized transaction size against the 1,232-byte IPv6 MTU limit, and computes exact compression savings through Address Lookup Tables (ALTs).
 - **Pre-Flight Declarative Safety Policy Guardrails**: Enforces declarative invariant policy rules (`MAX_COMPUTE_UNITS`, `MIN_COMPUTE_MARGIN`, `MAX_SOL_OUTFLOW`, `MIN_TOKEN_INFLOW`, `FORBIDDEN_PROGRAMS`, `DISALLOW_PERMANENT_DELEGATE`) against simulation results, delivering automated pre-broadcast pass/fail verdicts and granular violation reports.
@@ -45,7 +49,11 @@ Debugging Solana transaction simulation failures is notoriously frustrating. Whe
 ---
 
 ## 4. Key Features
-- **MCP Server for AI Agents**: Plug-and-play JSON-RPC 2.0 interface for AI trading and coding agents.
+- **MCP Server for AI Agents**: Plug-and-play JSON-RPC 2.0 interface for AI trading and coding agents (22 tools).
+- **Zero-Copy Memory Auditor**: Enforce Anchor zero_copy alignment and eliminate heap allocations on Solana BPF.
+- **Dynamic Anchor IDL Engine**: Decode arbitrary custom program instructions, accounts, and events without local workspace.
+- **CU Flamegraph Visualizer**: Standalone dark-mode SVG flamegraph and exclusive CU hotspot bottleneck locator.
+- **SPL Compression Auditor**: Right-size canopy depth and Merkle buffers to prevent 1,232-byte MTU truncation.
 - **Pre-Flight MEV Radar**: Scan transactions for sandwich attacks, excessive slippage, and mempool vulnerabilities.
 - **Multi-DEX Route Analyzer**: Visualize token swap pathways and detect cyclic arbitrage loops.
 - **Dynamic Priority Fee & Jito Tip Guide**: Exact micro-lamports and tip tiers per transaction archetype.
@@ -129,6 +137,21 @@ Available MCP Tools:
 - `solana_audit_guard`: Run pre-flight safety checks (slippage, drain, signer authorization).
 - `solana_simulate_bundle`: Simulate atomic multi-transaction Jito/MEV bundles.
 - `solana_generate_dossier`: Generate the standalone dark-mode HTML inspection dossier.
+- `solana_mev_radar`: Pre-flight MEV vulnerability scanning, sandwich exposure, and front-running risk assessment.
+- `solana_analyze_route`: Reconstruct multi-hop DEX swap paths and detect cyclic arbitrage.
+- `solana_fee_guide`: Generate dynamic 6-tier prioritization fees and 4-tier Jito tip recommendations.
+- `solana_decode_events`: Decode Anchor event emission logs and program return values.
+- `solana_stress_test`: Execution resilience testing across slippage tiers and priority fee surges.
+- `solana_shadow_diff`: Granular byte-level account modifications and rent-exempt reserves.
+- `solana_inspect_token_extensions`: Audit SPL Token-2022 mint configurations, transfer fees, and permanent delegates.
+- `solana_analyze_access_list`: Sealevel read/write lock audit, account access roles, and Address Lookup Table (ALT) savings.
+- `solana_verify_policy`: Enforce declarative pre-execution safety policy rules and invariant constraints.
+- `solana_audit_zero_copy`: Audit zero-copy account memory layout, padding holes, 8-byte alignment, and CU savings.
+- `solana_benchmark_zero_copy`: Benchmark Borsh vs. Zero-Copy deserialization compute cost and memory allocation.
+- `solana_decode_idl`: Dynamically register Anchor IDLs and decode raw instruction data and named accounts.
+- `solana_generate_flamegraph`: Hierarchical CU execution tree and flamegraph from simulation logs.
+- `solana_export_flamegraph_svg`: Generate standalone responsive dark-mode SVG flamegraph.
+- `solana_audit_compression`: Audit SPL Concurrent Merkle Tree canopy depth, buffer size, capacity, and MTU footprint.
 
 ---
 
@@ -137,6 +160,22 @@ Available MCP Tools:
 ```bash
 # Start standard Model Context Protocol (MCP) server
 sol-lens mcp
+
+# Audit account memory layout against Anchor zero_copy and #[repr(C)] alignment constraints
+sol-lens zero-copy account_struct.json
+sol-lens zero-copy account_struct.json --json
+
+# Dynamically decode raw instruction data against an Anchor IDL
+sol-lens idl 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P --data 0x66063d1201daebea00ca9a3b00000000
+sol-lens idl <PROGRAM_ID> --data <HEX_DATA> --idl my_idl.json
+
+# Generate hierarchical Compute Unit flamegraph and standalone SVG
+sol-lens flamegraph simulation_dump.json --ascii
+sol-lens flamegraph simulation_dump.json --svg flamegraph.svg
+
+# Audit SPL Concurrent Merkle Tree configuration, capacity, and MTU safety
+sol-lens compression --depth 14 --buffer 64 --canopy 0
+sol-lens compression --depth 20 --buffer 1024 --canopy 10 --json
 
 # Simulate and analyze an atomic multi-transaction bundle
 sol-lens bundle bundle.json
@@ -157,6 +196,30 @@ sol-lens mev-radar simulation_dump.json --slippage 300
 
 # Analyze multi-hop DEX swap route and render ASCII pipeline or Mermaid flow
 sol-lens route simulation_dump.json
+sol-lens route simulation_dump.json --mermaid
+sol-lens route simulation_dump.json --ascii
+
+# Generate dynamic priority fees and Jito tips guide
+sol-lens fee-guide simulation_dump.json --rpc https://api.mainnet-beta.solana.com
+
+# Decode Anchor event logs and program return data
+sol-lens decode-events simulation_dump.json
+
+# Stress-test simulation across slippage tiers and fee volatility surges
+sol-lens stress-test simulation_dump.json
+
+# Calculate byte-level account modifications and rent exemption
+sol-lens shadow-diff simulation_dump.json
+
+# Audit Token-2022 extensions, transfer fees, and permanent delegates
+sol-lens token-extensions TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb --amount 1000 --decimals 6
+
+# Audit Sealevel access list, read/write locks, and ALT recommendations
+sol-lens access-list access_list.json
+
+# Verify pre-execution safety policy rules and invariant constraints
+sol-lens verify-policy simulation_dump.json --rules rules.json
+```
 sol-lens route simulation_dump.json --mermaid
 
 # Generate dynamic priority fee tiers and Jito tip guide

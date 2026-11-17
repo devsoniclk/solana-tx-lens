@@ -7,13 +7,20 @@ from typing import Any, Dict, List, Optional
 
 from .access_list import analyze_access_list
 from .bundle import BundleSimulator
+from .compression import audit_compression_tree
 from .contention import audit_account_contention
 from .cpi_parser import parse_cpi_tree
 from .error_decoder import decode_solana_error
 from .events import decode_program_events_and_returns
 from .fee_guide import generate_fee_guide
+from .flamegraph import (
+    build_flamegraph_from_logs,
+    render_ascii_flamegraph,
+    render_svg_flamegraph,
+)
 from .guard import assess_simulation_health
 from .html_report import render_bundle_html_report, render_html_report
+from .idl_decoder import AnchorIDLRegistry, get_default_idl_registry
 from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
 from .policy import verify_simulation_policy
@@ -23,6 +30,7 @@ from .snapshot import create_account_snapshot_delta
 from .stress_tester import stress_test_simulation
 from .token_extensions import inspect_token_extensions
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence
+from .zero_copy import audit_zero_copy_layout, benchmark_zero_copy_cu
 
 
 class SolanaLensMCPServer:
@@ -369,6 +377,115 @@ class SolanaLensMCPServer:
                     "required": ["target", "rules"],
                 },
             },
+            {
+                "name": "solana_audit_zero_copy",
+                "description": "Audit Solana account memory layout against Anchor zero_copy, bytemuck Pod/Zeroable, and #[repr(C)] memory alignment rules. Computes field offsets, padding holes, 8-byte alignment, and CU savings.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "struct_name": {"type": "string", "description": "Name of the account struct."},
+                        "fields": {
+                            "type": "array",
+                            "items": {"type": "array", "items": {"type": "string"}},
+                            "description": "List of [field_name, type_str] pairs (e.g. [['owner', 'Pubkey'], ['amount', 'u64']]).",
+                        },
+                        "has_discriminator": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Whether Anchor injects an 8-byte discriminator prefix.",
+                        },
+                    },
+                    "required": ["struct_name", "fields"],
+                },
+            },
+            {
+                "name": "solana_benchmark_zero_copy",
+                "description": "Benchmark Compute Unit (CU) and heap allocation differences between standard Borsh deserialization and Zero-Copy AccountLoader in-place access.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "total_size": {"type": "integer", "description": "Total account size in bytes."},
+                        "num_fields": {"type": "integer", "description": "Number of struct fields."},
+                        "num_dynamic_vectors": {"type": "integer", "default": 0, "description": "Number of dynamic Vec elements."},
+                    },
+                    "required": ["total_size", "num_fields"],
+                },
+            },
+            {
+                "name": "solana_decode_idl",
+                "description": "Decode instruction data and account addresses against an Anchor IDL (or built-in popular IDLs such as Pump.fun).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "program_id": {"type": "string", "description": "Program base58 address."},
+                        "data_hex": {"type": "string", "description": "Raw instruction data as hex string."},
+                        "account_keys": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of account public keys in transaction.",
+                        },
+                        "idl_json": {
+                            "type": "string",
+                            "description": "Optional JSON string of the Anchor IDL specification.",
+                        },
+                    },
+                    "required": ["program_id", "data_hex"],
+                },
+            },
+            {
+                "name": "solana_generate_flamegraph",
+                "description": "Generate a hierarchical Compute Unit execution tree and flamegraph from Solana simulation logs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "logs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Simulation log messages array.",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["json", "ascii"],
+                            "default": "json",
+                            "description": "Output format: structured JSON or formatted ASCII tree.",
+                        },
+                    },
+                    "required": ["logs"],
+                },
+            },
+            {
+                "name": "solana_export_flamegraph_svg",
+                "description": "Generate a standalone, responsive dark-mode SVG flamegraph representing instruction and CPI CU consumption.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "logs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Simulation log messages array.",
+                        },
+                        "width": {
+                            "type": "integer",
+                            "default": 880,
+                            "description": "SVG width in points.",
+                        },
+                    },
+                    "required": ["logs"],
+                },
+            },
+            {
+                "name": "solana_audit_compression",
+                "description": "Audit SPL State Compression Concurrent Merkle Tree configuration (max_depth, max_buffer_size, canopy_depth), capacity, account size, rent, and transaction MTU safety.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "max_depth": {"type": "integer", "description": "Merkle tree depth (e.g. 14, 20, 26, 30)."},
+                        "max_buffer_size": {"type": "integer", "description": "Max concurrent changelog buffer size (e.g. 64, 256, 1024, 2048)."},
+                        "canopy_depth": {"type": "integer", "default": 0, "description": "Cached on-chain canopy levels (0 to max_depth)."},
+                    },
+                    "required": ["max_depth", "max_buffer_size"],
+                },
+            },
         ]
 
     def handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -593,6 +710,57 @@ class SolanaLensMCPServer:
                 pol_rep = verify_simulation_policy(res, rules=rules)
                 return pol_rep.to_dict()
 
+            elif name == "solana_audit_zero_copy":
+                sname = arguments["struct_name"]
+                fields_raw = arguments["fields"]
+                fields = [(str(f[0]), str(f[1])) for f in fields_raw]
+                disc = arguments.get("has_discriminator", True)
+                rep = audit_zero_copy_layout(struct_name=sname, fields=fields, has_discriminator=disc)
+                return rep.to_dict()
+
+            elif name == "solana_benchmark_zero_copy":
+                tsize = int(arguments["total_size"])
+                nfields = int(arguments["num_fields"])
+                ndyn = int(arguments.get("num_dynamic_vectors", 0))
+                return benchmark_zero_copy_cu(total_size=tsize, num_fields=nfields, num_dynamic_vectors=ndyn)
+
+            elif name == "solana_decode_idl":
+                pid = arguments["program_id"]
+                data_hex = arguments["data_hex"]
+                account_keys = arguments.get("account_keys")
+                idl_json = arguments.get("idl_json")
+                registry = get_default_idl_registry()
+                if idl_json:
+                    idl_dict = json.loads(idl_json)
+                    registry.register_idl(pid, idl_dict)
+                raw_bytes = bytes.fromhex(data_hex.replace("0x", ""))
+                decoded = registry.decode_instruction(pid, raw_bytes, account_keys=account_keys)
+                if decoded:
+                    return decoded.to_dict()
+                return {"error": f"Failed to decode instruction for program {pid}"}
+
+            elif name == "solana_generate_flamegraph":
+                logs = arguments.get("logs", [])
+                fmt = arguments.get("format", "json")
+                rep = build_flamegraph_from_logs(logs)
+                if fmt == "ascii":
+                    return {"ascii": render_ascii_flamegraph(rep), "report": rep.to_dict()}
+                return rep.to_dict()
+
+            elif name == "solana_export_flamegraph_svg":
+                logs = arguments.get("logs", [])
+                width = int(arguments.get("width", 880))
+                rep = build_flamegraph_from_logs(logs)
+                svg = render_svg_flamegraph(rep, width=width)
+                return {"svg": svg, "total_compute_units": rep.total_cus_consumed, "max_depth": rep.max_depth}
+
+            elif name == "solana_audit_compression":
+                mdepth = int(arguments["max_depth"])
+                mbuffer = int(arguments["max_buffer_size"])
+                cdepth = int(arguments.get("canopy_depth", 0))
+                rep = audit_compression_tree(max_depth=mdepth, max_buffer_size=mbuffer, canopy_depth=cdepth)
+                return rep.to_dict()
+
             else:
                 return {"error": f"Unknown tool: {name}"}
 
@@ -613,7 +781,7 @@ class SolanaLensMCPServer:
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "solana-tx-lens-mcp",
-                        "version": "0.7.0",
+                        "version": "0.8.0",
                     },
                 },
             }

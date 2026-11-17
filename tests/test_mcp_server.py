@@ -18,7 +18,7 @@ def test_mcp_initialize():
     assert resp["id"] == 1
     assert resp["result"]["protocolVersion"] == "2024-11-05"
     assert resp["result"]["serverInfo"]["name"] == "solana-tx-lens-mcp"
-    assert resp["result"]["serverInfo"]["version"] == "0.7.0"
+    assert resp["result"]["serverInfo"]["version"] == "0.8.0"
 
 
 def test_mcp_tools_list():
@@ -373,6 +373,138 @@ def test_mcp_call_verify_policy():
     content = json.loads(resp["result"]["content"][0]["text"])
     assert content["passed"] is True
     assert content["total_rules_evaluated"] == 1
+
+
+def test_mcp_call_audit_zero_copy():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_audit_zero_copy",
+            "arguments": {
+                "struct_name": "TestVault",
+                "fields": [["admin", "Pubkey"], ["balance", "u64"]],
+                "has_discriminator": True,
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["struct_name"] == "TestVault"
+    assert content["is_8byte_aligned"] is True
+    assert content["is_bpf_safe"] is True
+
+
+def test_mcp_call_benchmark_zero_copy():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_benchmark_zero_copy",
+            "arguments": {
+                "total_size": 512,
+                "num_fields": 8,
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["account_size_bytes"] == 512
+    assert content["zero_copy_deserialization"]["compute_units"] == 125
+
+
+def test_mcp_call_decode_idl():
+    server = SolanaLensMCPServer()
+    # Builtin pump.fun buy instruction: disc + amount + maxSolCost
+    import struct
+    import hashlib
+    disc = hashlib.sha256("global:buy".encode()).digest()[:8]
+    data_hex = (disc + struct.pack("<QQ", 5000, 1000)).hex()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_decode_idl",
+            "arguments": {
+                "program_id": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+                "data_hex": data_hex,
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["instruction_name"] == "buy"
+    assert content["args"]["amount"] == 5000
+
+
+def test_mcp_call_generate_flamegraph():
+    server = SolanaLensMCPServer()
+    logs = [
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3500 of 200000 compute units",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+    ]
+    req = {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_generate_flamegraph",
+            "arguments": {"logs": logs, "format": "json"},
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["total_cus_consumed"] == 3500
+    assert content["max_depth"] == 1
+
+
+def test_mcp_call_export_flamegraph_svg():
+    server = SolanaLensMCPServer()
+    logs = [
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3500 of 200000 compute units",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+    ]
+    req = {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_export_flamegraph_svg",
+            "arguments": {"logs": logs, "width": 800},
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert "<svg" in content["svg"]
+    assert content["total_compute_units"] == 3500
+
+
+def test_mcp_call_audit_compression():
+    server = SolanaLensMCPServer()
+    req = {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "method": "tools/call",
+        "params": {
+            "name": "solana_audit_compression",
+            "arguments": {
+                "max_depth": 14,
+                "max_buffer_size": 64,
+                "canopy_depth": 0,
+            },
+        },
+    }
+    resp = server.handle_request(req)
+    content = json.loads(resp["result"]["content"][0]["text"])
+    assert content["max_capacity_nodes"] == 16384
+    assert content["is_mtu_safe"] is True
 
 
 def test_mcp_unknown_tool():

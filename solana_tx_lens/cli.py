@@ -5,11 +5,18 @@ import json
 import sys
 from .access_list import analyze_access_list
 from .bundle import BundleSimulator
+from .compression import audit_compression_tree
 from .contention import audit_account_contention
 from .error_decoder import decode_solana_error
 from .events import decode_program_events_and_returns
 from .fee_guide import generate_fee_guide
+from .flamegraph import (
+    build_flamegraph_from_logs,
+    render_ascii_flamegraph,
+    render_svg_flamegraph,
+)
 from .html_report import render_bundle_html_report, render_html_report
+from .idl_decoder import AnchorIDLRegistry, get_default_idl_registry
 from .mcp_server import SolanaLensMCPServer
 from .mev_radar import scan_mev_vulnerabilities
 from .optimizer import optimize_compute_budget
@@ -20,6 +27,7 @@ from .snapshot import create_account_snapshot_delta
 from .stress_tester import stress_test_simulation
 from .token_extensions import inspect_token_extensions
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence, render_simulation_report
+from .zero_copy import audit_zero_copy_layout
 
 
 def main() -> None:
@@ -232,6 +240,44 @@ def main() -> None:
     p_vp.add_argument("--rules", required=True, help="Path to rules JSON file or inline JSON string.")
     p_vp.add_argument("--rpc", default="https://api.mainnet-beta.solana.com", help="Solana RPC endpoint.")
     p_vp.add_argument("--json", action="store_true", help="Output policy report as JSON.")
+
+    # zero-copy command
+    p_zc = subparsers.add_parser(
+        "zero-copy",
+        help="Audit account memory layout against Anchor zero_copy and #[repr(C)] alignment constraints.",
+    )
+    p_zc.add_argument("target", help="JSON file containing struct definition or inline JSON ({struct_name, fields}).")
+    p_zc.add_argument("--json", action="store_true", help="Output zero-copy audit report as JSON.")
+
+    # idl command
+    p_idl = subparsers.add_parser(
+        "idl",
+        help="Decode raw instruction data against an Anchor IDL.",
+    )
+    p_idl.add_argument("program", help="Solana program public key.")
+    p_idl.add_argument("--data", required=True, help="Hex-encoded instruction data.")
+    p_idl.add_argument("--idl", default=None, help="Path to Anchor IDL JSON file.")
+    p_idl.add_argument("--json", action="store_true", help="Output decoded instruction as JSON.")
+
+    # flamegraph command
+    p_fg = subparsers.add_parser(
+        "flamegraph",
+        help="Generate hierarchical Compute Unit execution tree and flamegraph from simulation logs.",
+    )
+    p_fg.add_argument("target", help="Path to JSON simulation output or raw log file.")
+    p_fg.add_argument("--ascii", action="store_true", help="Render formatted ASCII tree with percentage bars.")
+    p_fg.add_argument("--svg", default=None, help="Save standalone dark-mode SVG flamegraph to file.")
+    p_fg.add_argument("--json", action="store_true", help="Output structured flamegraph report as JSON.")
+
+    # compression command
+    p_cm = subparsers.add_parser(
+        "compression",
+        help="Audit SPL Concurrent Merkle Tree configuration, capacity, account size, and MTU footprint.",
+    )
+    p_cm.add_argument("--depth", type=int, required=True, help="Merkle tree max depth (e.g. 14, 20, 26, 30).")
+    p_cm.add_argument("--buffer", type=int, required=True, help="Concurrent buffer size (e.g. 64, 256, 1024, 2048).")
+    p_cm.add_argument("--canopy", type=int, default=0, help="Cached canopy depth levels (default: 0).")
+    p_cm.add_argument("--json", action="store_true", help="Output compression audit as JSON.")
 
     args = parser.parse_args()
 
@@ -768,6 +814,122 @@ def main() -> None:
                         print(f"       Actual:   {v.actual_value}")
                     if v.expected_value is not None:
                         print(f"       Expected: {v.expected_value}")
+            print("==================================================")
+
+    elif args.command == "zero-copy":
+        try:
+            with open(args.target, "r") as f:
+                data = json.load(f)
+        except Exception:
+            data = json.loads(args.target)
+
+        sname = data.get("struct_name", "AccountStruct")
+        raw_fields = data.get("fields", [])
+        fields = [(str(f[0]), str(f[1])) for f in raw_fields]
+        disc = data.get("has_discriminator", True)
+
+        rep = audit_zero_copy_layout(sname, fields, has_discriminator=disc)
+        if args.json:
+            print(json.dumps(rep.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(f" ZERO-COPY MEMORY LAYOUT AUDIT: {sname}")
+            print("==================================================")
+            print(f"Total Struct Size:   {rep.total_size} bytes")
+            print(f"Usable Field Size:   {rep.usable_size} bytes")
+            print(f"Total Padding:       {rep.total_padding_bytes} bytes ({rep.padding_ratio*100:.1f}%)")
+            print(f"8-Byte Aligned:      {rep.is_8byte_aligned}")
+            print(f"BPF Memory Safe:     {rep.is_bpf_safe}")
+            print(f"Estimated CU Delta:  Borsh: ~{rep.borsh_estimated_cus:,} CUs vs Zero-Copy: ~{rep.zero_copy_estimated_cus} CUs ({rep.cu_savings_percent:.1f}% savings)")
+
+            print("\nField Layout:")
+            for fl in rep.fields:
+                pad_str = f" [+{fl.padding_before}B pad]" if fl.padding_before > 0 else ""
+                print(f"  - @{fl.offset:>4}B: {fl.name:<18} {fl.type_name:<12} ({fl.size:>3}B, align {fl.alignment}){pad_str}")
+
+            if rep.recommendations:
+                print("\nRecommendations:")
+                for r in rep.recommendations:
+                    print(f"  💡 {r}")
+            print("==================================================")
+
+    elif args.command == "idl":
+        registry = get_default_idl_registry()
+        if args.idl:
+            with open(args.idl, "r") as f:
+                idl_dict = json.load(f)
+            registry.register_idl(args.program, idl_dict)
+
+        raw_bytes = bytes.fromhex(args.data.replace("0x", ""))
+        decoded = registry.decode_instruction(args.program, raw_bytes)
+        if args.json:
+            print(json.dumps(decoded.to_dict() if decoded else {"error": "Failed to decode"}, indent=2))
+        else:
+            print("==================================================")
+            print(" ANCHOR IDL INSTRUCTION DECODER")
+            print("==================================================")
+            if decoded:
+                print(f"Program ID:         {decoded.program_id}")
+                print(f"Instruction Name:   {decoded.instruction_name}")
+                print(f"Discriminator:      0x{decoded.discriminator_hex}")
+                print("\nDecoded Arguments:")
+                for k, v in decoded.args.items():
+                    print(f"  - {k}: {v}")
+                if decoded.accounts:
+                    print("\nExpected Accounts:")
+                    for acc in decoded.accounts:
+                        mut_s = "writable" if acc.is_writable else "readonly"
+                        sig_s = ", signer" if acc.is_signer else ""
+                        print(f"  - {acc.name:<18} [{mut_s}{sig_s}]")
+            else:
+                print("Failed to decode instruction with registered IDLs.")
+            print("==================================================")
+
+    elif args.command == "flamegraph":
+        try:
+            with open(args.target, "r") as f:
+                content = f.read().strip()
+                try:
+                    data = json.loads(content)
+                    logs = data.get("logs", [])
+                except json.JSONDecodeError:
+                    logs = content.splitlines()
+        except Exception:
+            logs = [args.target]
+
+        rep = build_flamegraph_from_logs(logs)
+
+        if args.svg:
+            svg_content = render_svg_flamegraph(rep)
+            with open(args.svg, "w", encoding="utf-8") as f:
+                f.write(svg_content)
+            print(f"Standalone SVG flamegraph saved to: {args.svg}")
+
+        if args.json:
+            print(json.dumps(rep.to_dict(), indent=2))
+        elif args.ascii or not args.svg:
+            print(render_ascii_flamegraph(rep))
+
+    elif args.command == "compression":
+        rep = audit_compression_tree(args.depth, args.buffer, canopy_depth=args.canopy)
+        if args.json:
+            print(json.dumps(rep.to_dict(), indent=2))
+        else:
+            print("==================================================")
+            print(" SPL CONCURRENT MERKLE TREE AUDIT")
+            print("==================================================")
+            print(f"Max Depth:           {rep.max_depth} (Capacity: {rep.max_capacity_nodes:,} leaves)")
+            print(f"Max Buffer Size:     {rep.max_buffer_size} ({rep.concurrency_throughput_tier})")
+            print(f"Canopy Depth:        {rep.canopy_depth} ({rep.canopy_node_count:,} cached nodes)")
+            print(f"Account Byte Size:   {rep.tree_account_size_bytes:,} bytes")
+            print(f"Rent-Exempt Reserve: {rep.rent_exempt_sol:.4f} SOL ({rep.rent_exempt_lamports:,} lamports)")
+            print(f"Client Proof Length: {rep.required_proof_len} nodes ({rep.proof_bytes_in_tx} bytes in tx)")
+            print(f"MTU Safe:            {rep.is_mtu_safe}")
+
+            if rep.recommendations:
+                print("\nRecommendations:")
+                for r in rep.recommendations:
+                    print(f"  💡 {r}")
             print("==================================================")
 
     elif args.command == "simulate":

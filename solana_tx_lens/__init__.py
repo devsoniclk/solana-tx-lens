@@ -20,6 +20,11 @@ from .bundle import (
     BundleSimulator,
     JitoTipAnalysis,
 )
+from .compression import (
+    CompressionTreeAuditReport,
+    audit_compression_tree,
+    calculate_tree_account_size,
+)
 from .contention import AccountAccess, ContentionReport, audit_account_contention
 from .cpi_parser import parse_cpi_tree
 from .diff_engine import compute_account_diffs, compute_token_diffs, parse_token_transfers_from_logs
@@ -33,8 +38,26 @@ from .events import (
     decode_program_events_and_returns,
 )
 from .fee_guide import JitoTipTier, PriorityFeeTier, SolanaFeeGuide, generate_fee_guide
+from .flamegraph import (
+    CUHotspot,
+    FlamegraphNode,
+    FlamegraphReport,
+    build_flamegraph_from_logs,
+    render_ascii_flamegraph,
+    render_svg_flamegraph,
+)
 from .guard import assess_simulation_health
 from .html_report import render_bundle_html_report, render_html_report
+from .idl_decoder import (
+    AnchorIDLRegistry,
+    DecodedInstruction,
+    DecodedInstructionAccount,
+    compute_account_discriminator,
+    compute_anchor_discriminator,
+    compute_event_discriminator,
+    compute_instruction_discriminator,
+    get_default_idl_registry,
+)
 from .instruction_decoder import extract_instruction_name, get_program_label
 from .mcp_server import SolanaLensMCPServer
 from .mev_radar import MEVAttackVector, MEVVulnerabilityReport, scan_mev_vulnerabilities
@@ -84,8 +107,15 @@ from .visualizer import (
     render_cpi_tree,
     render_simulation_report,
 )
+from .zero_copy import (
+    FieldLayout,
+    FieldTypeSpec,
+    ZeroCopyAuditReport,
+    audit_zero_copy_layout,
+    benchmark_zero_copy_cu,
+)
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __all__ = [
     "SolanaSimulator",
     "BundleSimulator",
@@ -163,4 +193,26 @@ __all__ = [
     "PolicyRule",
     "PolicyViolation",
     "PolicyVerificationReport",
+    "FieldLayout",
+    "FieldTypeSpec",
+    "ZeroCopyAuditReport",
+    "audit_zero_copy_layout",
+    "benchmark_zero_copy_cu",
+    "AnchorIDLRegistry",
+    "DecodedInstruction",
+    "DecodedInstructionAccount",
+    "compute_anchor_discriminator",
+    "compute_instruction_discriminator",
+    "compute_account_discriminator",
+    "compute_event_discriminator",
+    "get_default_idl_registry",
+    "FlamegraphNode",
+    "FlamegraphReport",
+    "CUHotspot",
+    "build_flamegraph_from_logs",
+    "render_ascii_flamegraph",
+    "render_svg_flamegraph",
+    "CompressionTreeAuditReport",
+    "audit_compression_tree",
+    "calculate_tree_account_size",
 ]

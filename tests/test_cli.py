@@ -514,3 +514,107 @@ def test_cli_verify_policy_subcommand(tmp_path):
     assert res.returncode == 0
     assert "PRE-FLIGHT SAFETY POLICY & INVARIANT AUDIT" in res.stdout
     assert "Policy Status:       PASSED" in res.stdout
+
+
+def test_cli_zero_copy_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    zc_file = tmp_path / "zc.json"
+    zc_file.write_text(
+        json.dumps(
+            {
+                "struct_name": "VaultAccount",
+                "fields": [["authority", "Pubkey"], ["amount", "u64"]],
+                "has_discriminator": True,
+            }
+        )
+    )
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "zero-copy", str(zc_file)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "ZERO-COPY MEMORY LAYOUT AUDIT: VaultAccount" in res.stdout
+    assert "8-Byte Aligned:      True" in res.stdout
+    assert "BPF Memory Safe:     True" in res.stdout
+
+
+def test_cli_idl_subcommand():
+    repo_root = Path(__file__).parent.parent
+    import hashlib
+    import struct
+    disc = hashlib.sha256("global:buy".encode()).digest()[:8]
+    data_hex = (disc + struct.pack("<QQ", 500000, 25000)).hex()
+
+    res = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "solana_tx_lens.cli",
+            "idl",
+            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+            "--data",
+            data_hex,
+        ],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "ANCHOR IDL INSTRUCTION DECODER" in res.stdout
+    assert "Instruction Name:   buy" in res.stdout
+    assert "amount: 500000" in res.stdout
+
+
+def test_cli_flamegraph_subcommand(tmp_path):
+    repo_root = Path(__file__).parent.parent
+    log_file = tmp_path / "logs.txt"
+    log_file.write_text(
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]\n"
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3500 of 200000 compute units\n"
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success\n"
+    )
+    svg_file = tmp_path / "flame.svg"
+
+    res = subprocess.run(
+        [sys.executable, "-m", "solana_tx_lens.cli", "flamegraph", str(log_file), "--ascii", "--svg", str(svg_file)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "Execution Flamegraph" in res.stdout
+    assert svg_file.exists()
+    assert "<svg" in svg_file.read_text()
+
+
+def test_cli_compression_subcommand():
+    repo_root = Path(__file__).parent.parent
+    res = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "solana_tx_lens.cli",
+            "compression",
+            "--depth",
+            "14",
+            "--buffer",
+            "64",
+            "--canopy",
+            "0",
+        ],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(repo_root)},
+    )
+    assert res.returncode == 0
+    assert "SPL CONCURRENT MERKLE TREE AUDIT" in res.stdout
+    assert "Max Depth:           14 (Capacity: 16,384 leaves)" in res.stdout
+    assert "MTU Safe:            True" in res.stdout
+

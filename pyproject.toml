@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "solana-tx-lens"
-version = "0.7.0"
+version = "0.8.0"
 description = "Headless transaction simulation inspector, CPI tree visualizer, pre-flight MEV guard, atomic Jito bundle simulator, and MCP server for Solana"
 readme = "README.md"
 authors = [{ name = "Lakshitha Dananjaya", email = "lakshitha.dananjaya.org@gmail.com" }]
