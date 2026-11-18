@@ -279,6 +279,22 @@ def main() -> None:
     p_cm.add_argument("--canopy", type=int, default=0, help="Cached canopy depth levels (default: 0).")
     p_cm.add_argument("--json", action="store_true", help="Output compression audit as JSON.")
 
+    # Multisig Consensus
+    p_ms = subparsers.add_parser("multisig", help="Verify multisig threshold or BFT consensus approvals for a transaction.")
+    p_ms.add_argument("--signers", default="", help="Comma-separated list of present signer pubkeys.")
+    p_ms.add_argument("--threshold", type=int, default=2, help="Required signature threshold.")
+    p_ms.add_argument("--total", type=int, default=3, help="Total committee size.")
+    p_ms.add_argument("--cert", default=None, help="Path to BFT consensus certificate JSON.")
+    p_ms.add_argument("--slashed", default="", help="Comma-separated list of slashed pubkeys.")
+    p_ms.add_argument("--json", action="store_true", help="Output as JSON.")
+
+    # Dynamic Priority Fee
+    p_pf = subparsers.add_parser("priority-fee", help="Predict dynamic compute unit priority fees across latency percentiles.")
+    p_pf.add_argument("--accounts", default="", help="Comma-separated list of writable account pubkeys.")
+    p_pf.add_argument("--cu", type=int, default=200000, help="Target compute units (default: 200,000).")
+    p_pf.add_argument("--congestion", type=float, default=1.0, help="Cluster congestion multiplier.")
+    p_pf.add_argument("--json", action="store_true", help="Output as JSON.")
+
     args = parser.parse_args()
 
     if args.command == "mcp":
@@ -930,6 +946,58 @@ def main() -> None:
                 print("\nRecommendations:")
                 for r in rep.recommendations:
                     print(f"  💡 {r}")
+            print("==================================================")
+
+    elif args.command == "multisig":
+        from .multisig import MultisigConsensusVerifier, MultisigVerificationError
+        slashed_list = [s.strip() for s in args.slashed.split(",") if s.strip()]
+        verifier = MultisigConsensusVerifier(
+            threshold=args.threshold,
+            total_members=args.total,
+            slashed_members=slashed_list,
+        )
+        if args.cert:
+            with open(args.cert, "r") as f:
+                cert_data = json.load(f)
+            try:
+                res = verifier.verify_bft_certificate(cert_data)
+                if args.json:
+                    print(json.dumps(res, indent=2))
+                else:
+                    print(f"BFT Certificate Verified: Quorum achieved ({res['committed_weight']}/{res['quorum_threshold']})")
+            except MultisigVerificationError as e:
+                print(f"Multisig Verification Failed: {e}")
+                sys.exit(1)
+        else:
+            present = [s.strip() for s in args.signers.split(",") if s.strip()]
+            try:
+                res = verifier.verify_signers(present)
+                if args.json:
+                    print(json.dumps(res, indent=2))
+                else:
+                    print(f"Multisig Verification Succeeded: {res['valid_signatures']}/{res['threshold']} signatures valid.")
+            except MultisigVerificationError as e:
+                print(f"Multisig Verification Failed: {e}")
+                sys.exit(1)
+
+    elif args.command == "priority-fee":
+        from .priority_fee import DynamicFeeOptimizer
+        acc_list = [a.strip() for a in args.accounts.split(",") if a.strip()]
+        optimizer = DynamicFeeOptimizer()
+        res = optimizer.predict_priority_fee(acc_list, target_compute_units=args.cu, congestion_multiplier=args.congestion)
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print("==================================================")
+            print(" DYNAMIC COMPUTE UNIT PRIORITY FEE RECOMMENDATIONS")
+            print("==================================================")
+            print(f"Target CUs:          {res['target_compute_units']:,}")
+            print(f"Contention Index:    {res['contention_index']}x")
+            print(f"P50 (Standard):      {res['recommendations']['p50_standard']['micro_lamports_per_cu']} micro-lamports/CU (+{res['recommendations']['p50_standard']['estimated_additional_sol']:.6f} SOL)")
+            print(f"P75 (Fast):          {res['recommendations']['p75_fast']['micro_lamports_per_cu']} micro-lamports/CU (+{res['recommendations']['p75_fast']['estimated_additional_sol']:.6f} SOL)")
+            print(f"P90 (Turbo):         {res['recommendations']['p90_turbo']['micro_lamports_per_cu']} micro-lamports/CU (+{res['recommendations']['p90_turbo']['estimated_additional_sol']:.6f} SOL)")
+            print(f"P99 (Ultra):         {res['recommendations']['p99_ultra']['micro_lamports_per_cu']} micro-lamports/CU (+{res['recommendations']['p99_ultra']['estimated_additional_sol']:.6f} SOL)")
+            print(f"Instruction:         {res['suggested_instruction']}")
             print("==================================================")
 
     elif args.command == "simulate":

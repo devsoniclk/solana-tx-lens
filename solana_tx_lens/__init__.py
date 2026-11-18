@@ -114,9 +114,11 @@ from .zero_copy import (
     audit_zero_copy_layout,
     benchmark_zero_copy_cu,
 )
-from .witness_bridge import attest_simulation_result
+from .witness_bridge import attest_simulation_result, attest_simulation
+from .multisig import MultisigConsensusVerifier, MultisigVerificationError
+from .priority_fee import DynamicFeeOptimizer
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 __all__ = [
     "SolanaSimulator",
     "BundleSimulator",
@@ -217,4 +219,8 @@ __all__ = [
     "audit_compression_tree",
     "calculate_tree_account_size",
     "attest_simulation_result",
+    "attest_simulation",
+    "MultisigConsensusVerifier",
+    "MultisigVerificationError",
+    "DynamicFeeOptimizer",
 ]

@@ -28,6 +28,9 @@ from .route_analyzer import analyze_swap_route
 from .simulator import SolanaSimulator
 from .snapshot import create_account_snapshot_delta
 from .stress_tester import stress_test_simulation
+from .witness_bridge import attest_simulation
+from .multisig import MultisigConsensusVerifier, MultisigVerificationError
+from .priority_fee import DynamicFeeOptimizer
 from .token_extensions import inspect_token_extensions
 from .visualizer import render_cpi_mermaid_flowchart, render_cpi_mermaid_sequence
 from .zero_copy import audit_zero_copy_layout, benchmark_zero_copy_cu
@@ -486,6 +489,45 @@ class SolanaLensMCPServer:
                     "required": ["max_depth", "max_buffer_size"],
                 },
             },
+            {
+                "name": "solana_attest_simulation",
+                "description": "Attest Solana transaction simulation telemetry into an agent-witness deliberation step or receipt.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "simulation": {"type": "object", "description": "Simulation result dictionary."},
+                        "agent_id": {"type": "string", "description": "Agent identifier proposing attestation.", "default": "solana-tx-lens"},
+                    },
+                    "required": ["simulation"],
+                },
+            },
+            {
+                "name": "solana_simulate_multisig_consensus",
+                "description": "Verify multisig threshold signatures or BFT consensus certificates for a transaction before simulation.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "present_signers": {"type": "array", "items": {"type": "string"}, "description": "List of public keys that signed."},
+                        "threshold": {"type": "integer", "description": "Required signature threshold.", "default": 2},
+                        "total_members": {"type": "integer", "description": "Total multisig committee size.", "default": 3},
+                        "slashed_members": {"type": "array", "items": {"type": "string"}, "description": "List of slashed/Byzantine keys."},
+                        "certificate": {"type": "object", "description": "Optional BFT consensus certificate."},
+                    },
+                },
+            },
+            {
+                "name": "solana_predict_priority_fee",
+                "description": "Predict dynamic priority fees across percentiles (P50, P75, P90, P99) based on account write-lock contention.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "writable_accounts": {"type": "array", "items": {"type": "string"}, "description": "List of writable account pubkeys."},
+                        "target_compute_units": {"type": "integer", "description": "Target compute units required.", "default": 200000},
+                        "congestion_multiplier": {"type": "number", "description": "Cluster congestion factor multiplier.", "default": 1.0},
+                    },
+                    "required": ["writable_accounts"],
+                },
+            },
         ]
 
     def handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -761,6 +803,28 @@ class SolanaLensMCPServer:
                 rep = audit_compression_tree(max_depth=mdepth, max_buffer_size=mbuffer, canopy_depth=cdepth)
                 return rep.to_dict()
 
+            elif name == "solana_attest_simulation":
+                sim_data = arguments.get("simulation", {})
+                agent_id = arguments.get("agent_id", "solana-tx-lens")
+                return attest_simulation(sim_data, agent_id=agent_id)
+
+            elif name == "solana_simulate_multisig_consensus":
+                threshold = int(arguments.get("threshold", 2))
+                total_members = int(arguments.get("total_members", 3))
+                slashed = arguments.get("slashed_members", [])
+                verifier = MultisigConsensusVerifier(threshold=threshold, total_members=total_members, slashed_members=slashed)
+                if "certificate" in arguments and arguments["certificate"]:
+                    return verifier.verify_bft_certificate(arguments["certificate"])
+                signers = arguments.get("present_signers", [])
+                return verifier.verify_signers(signers)
+
+            elif name == "solana_predict_priority_fee":
+                accounts = arguments.get("writable_accounts", [])
+                cu = int(arguments.get("target_compute_units", 200000))
+                factor = float(arguments.get("congestion_multiplier", 1.0))
+                optimizer = DynamicFeeOptimizer()
+                return optimizer.predict_priority_fee(accounts, target_compute_units=cu, congestion_multiplier=factor)
+
             else:
                 return {"error": f"Unknown tool: {name}"}
 
@@ -799,18 +863,18 @@ class SolanaLensMCPServer:
             tool_name = params.get("name")
             tool_args = params.get("arguments", {})
             res = self.handle_tool_call(tool_name, tool_args)
+            result_payload = dict(res) if isinstance(res, dict) else {}
+            result_payload["content"] = [
+                {
+                    "type": "text",
+                    "text": json.dumps(res, indent=2),
+                }
+            ]
+            result_payload["isError"] = "error" in res if isinstance(res, dict) else False
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
-                "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(res, indent=2),
-                        }
-                    ],
-                    "isError": "error" in res,
-                },
+                "result": result_payload,
             }
 
         elif method == "ping":

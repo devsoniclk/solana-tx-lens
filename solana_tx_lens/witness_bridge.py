@@ -67,3 +67,37 @@ def attest_simulation_result(
             "reason": "agent-witness not installed",
             "witness_installed": False,
         }
+
+
+def attest_simulation(
+    simulation: Any,
+    engine: Optional[Any] = None,
+    agent_id: str = "solana-trading-agent",
+) -> Dict[str, Any]:
+    """
+    Attests a transaction simulation result (SimulationResult or dict) into an agent-witness deliberation step.
+    """
+    if isinstance(simulation, dict):
+        step_desc = f"Solana Simulation: success={simulation.get('success')}, CUs={simulation.get('total_compute_units', 0)}"
+        meta = {
+            "success": simulation.get("success", True),
+            "total_compute_units": simulation.get("total_compute_units", 0),
+            "max_compute_units": simulation.get("max_compute_units", 200000),
+            "error": simulation.get("error"),
+        }
+        eng = engine or (WitnessEngine(agent_id=agent_id) if HAS_WITNESS else None)
+        if eng:
+            step = eng.record_step(StepType.TOOL_RESULT, step_desc, metadata=meta)
+            return {
+                "attested": True,
+                "step_index": getattr(step, "index", 0),
+                "success": meta["success"],
+                "compute_units": meta["total_compute_units"],
+                "witness_installed": HAS_WITNESS,
+            }
+        return {
+            "attested": False,
+            "reason": "agent-witness not installed",
+            "witness_installed": False,
+        }
+    return attest_simulation_result(simulation, engine=engine, agent_id=agent_id)
